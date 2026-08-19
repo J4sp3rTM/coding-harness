@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LlmOAuthError } from '@deepseek-ai/dsh-llm-oauth'
 import type { LlmOAuthInteraction } from '@deepseek-ai/dsh-llm-oauth'
-import type { AuthInteraction, OAuthCredential } from '@earendil-works/pi-ai'
+import type { OAuthCredential, ProviderAuthInteraction } from '@earendil-works/pi-ai'
 
 /** The one catalog flow these tests sign in through; the real ones open a browser. */
-const login = vi.fn<(interaction: AuthInteraction) => Promise<OAuthCredential>>()
+const login = vi.fn<(interaction: ProviderAuthInteraction) => Promise<OAuthCredential>>()
 
 vi.mock('../src/flows.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/flows.ts')>()
@@ -18,7 +18,7 @@ vi.mock('../src/flows.ts', async (importOriginal) => {
     loginLabel: 'Anthropic (Claude Pro/Max)',
     auth: {
       name: 'Anthropic (Claude Pro/Max)',
-      login: (interaction: AuthInteraction) => login(interaction),
+      login: (interaction: ProviderAuthInteraction) => login(interaction),
       refresh: () => Promise.reject(new Error('unused')),
       toAuth: () => Promise.reject(new Error('unused')),
     },
@@ -114,6 +114,7 @@ describe('LocalLlmOAuthService', () => {
   it('hands the flow a surface that reaches the caller', async () => {
     const ctx = await boot()
     login.mockImplementation(async (piInteraction) => {
+      expect(piInteraction.signal.aborted).toBe(false)
       piInteraction.notify({ type: 'progress', message: 'exchanging' })
       const answer = await piInteraction.prompt({ type: 'manual_code', message: 'paste?' })
       return { ...credential, access: answer }
@@ -131,6 +132,7 @@ describe('LocalLlmOAuthService', () => {
     })
     await expect(ctx.llmOAuth.login('anthropic', { ...interaction(), signal: controller.signal }))
       .rejects.toMatchObject({ code: 'LOGIN_ABORTED' })
+    expect(login.mock.calls[0]?.[0].signal).toBe(controller.signal)
     login.mockRejectedValue(new Error('token exchange failed'))
     await expect(ctx.llmOAuth.login('anthropic', interaction()))
       .rejects.toMatchObject({ code: 'LOGIN_FAILED' })

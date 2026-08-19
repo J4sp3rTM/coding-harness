@@ -14,7 +14,7 @@
  */
 
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
-import type { AuthEvent, AuthInteraction, AuthPrompt, OAuthAuth, OAuthCredential } from '@earendil-works/pi-ai'
+import type { AuthEvent, AuthPrompt, OAuthAuth, OAuthCredential, ProviderAuthInteraction } from '@earendil-works/pi-ai'
 import { LlmOAuthError } from '@deepseek-ai/dsh-llm-oauth'
 import type { LlmOAuthEvent, LlmOAuthInteraction, LlmOAuthPrompt, LlmOAuthToken } from '@deepseek-ai/dsh-llm-oauth'
 
@@ -133,14 +133,14 @@ function toSeamPrompt(prompt: AuthPrompt): LlmOAuthPrompt {
  * difference.
  * @param interaction - the seam surface the flow talks to.
  * @param onNotifyFailure - observes a contained `notify` failure.
- * @returns the pi-ai interaction to pass into the flow.
+ * @returns the normalized pi-ai interaction to pass into the provider flow.
  */
 export function toPiInteraction(
   interaction: LlmOAuthInteraction,
   onNotifyFailure: (error: unknown) => void,
-): AuthInteraction {
+): ProviderAuthInteraction {
   return {
-    ...interaction.signal === undefined ? {} : { signal: interaction.signal },
+    signal: interaction.signal ?? new AbortController().signal,
     prompt: prompt => interaction.prompt(toSeamPrompt(prompt)),
     notify: (event) => {
       try {
