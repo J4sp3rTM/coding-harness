@@ -299,6 +299,12 @@ export function InputBar({
     // keyCode 229 is the legacy IME-composition signal engines emit without isComposing.
     // oxlint-disable-next-line typescript/no-deprecated
     const composing = composingRef.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // Plain Tab completes the menu's best highlighted candidate; modified
+      // Tab remains native focus navigation.
+      if (keyboard.arbitrate('tab', composing) !== 'pass') e.preventDefault()
+      return
+    }
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       if (keyboard.arbitrate(e.key === 'ArrowUp' ? 'up' : 'down', composing) === 'consumed') e.preventDefault()
       return

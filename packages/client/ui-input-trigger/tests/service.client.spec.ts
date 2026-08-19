@@ -16,6 +16,7 @@ import type {
   BeginCommandRequest, ClientSessionContext, CommandClaim, InsertReferenceRequest, PickOutcome,
   ReferenceInsert, InputTriggerCandidate, InputTriggerPick, InputTriggerSource, SourceRoster, TriggerChar,
 } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import type { InsertTextRequest } from '../src/types.ts'
 
 const sid = (k: string): SessionId => k as SessionId
 
@@ -656,10 +657,10 @@ describe('lexicon', () => {
 describe('arbitrate', () => {
   async function menuBench() {
     const cmd = readySource('/', 'command', [{ name: 'goal' }, { name: 'plan' }], () => undefined)
-    const { controller } = controllerBench([cmd.source])
+    const { controller, actx } = controllerBench([cmd.source])
     controller.track('/g', 2, { tier: 'plain' }, 1)
     await tick()
-    return { controller, cmd }
+    return { controller, cmd, actx }
   }
 
   it('up/down move the highlight and are consumed', async () => {
@@ -668,6 +669,19 @@ describe('arbitrate', () => {
     expect(controller.menu.getSnapshot().highlight).toEqual({ source: 'command', index: 1 })
     expect(controller.arbitrate('up', false)).toBe('consumed')
     expect(controller.menu.getSnapshot().highlight).toEqual({ source: 'command', index: 0 })
+  })
+
+  it('Tab completes the best highlighted command without invoking it', async () => {
+    const { controller, cmd, actx } = await menuBench()
+    const inserts: InsertTextRequest[] = []
+    actx.on('slash/input-insert-text', (request) => {
+      inserts.push(request)
+      return true
+    })
+    expect(controller.arbitrate('tab', false)).toBe('pick-highlighted')
+    expect(inserts).toEqual([{ text: '/goal ', span: { start: 0, end: 2, draftRev: 1 } }])
+    expect(cmd.picks).toHaveLength(0)
+    expect(controller.menu.getSnapshot().open).toBe(false)
   })
 
   it('enter picks the highlight through the pipeline', async () => {
@@ -685,19 +699,21 @@ describe('arbitrate', () => {
 
   it('IME composition passes every key untouched', async () => {
     const { controller } = await menuBench()
-    for (const key of ['up', 'down', 'enter', 'escape'] as const) {
+    for (const key of ['up', 'down', 'tab', 'enter', 'escape'] as const) {
       expect(controller.arbitrate(key, true)).toBe('pass')
     }
     expect(controller.menu.getSnapshot().open).toBe(true)
   })
 
-  it('closed menu passes; an open menu without a highlight passes enter', () => {
+  it('closed menu passes; an open menu without a highlight passes Enter and Tab', () => {
     const cmd = deferredSource('/', 'command')
     const { controller } = controllerBench([cmd.source])
     expect(controller.arbitrate('enter', false)).toBe('pass')
+    expect(controller.arbitrate('tab', false)).toBe('pass')
     // Open with the only group still pending: nothing to pick yet.
     controller.track('/g', 2, { tier: 'plain' }, 1)
     expect(controller.arbitrate('enter', false)).toBe('pass')
+    expect(controller.arbitrate('tab', false)).toBe('pass')
   })
 })
 

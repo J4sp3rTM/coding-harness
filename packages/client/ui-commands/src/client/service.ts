@@ -142,6 +142,7 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
       name: 'command',
       candidates: (session, req) => this.candidates(session, req),
       onPick: pick => this.dispatch(pick),
+      onComplete: pick => this.completeCommand(pick),
       matchSpace: (session, token) => this.matchSpace(session, token),
       matchEnter: (session, line, signal) => this.matchEnter(session, line, signal),
       warm: (session) => { this.directory.warm(session.sessionId) },
@@ -259,6 +260,13 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
       rows.filter(c => req.position === 'leading' || c.hint === undefined),
       req.query,
     )
+  }
+
+  /** Tab completion claims a host command so the token is marked in the composer. */
+  private completeCommand(pick: InputTriggerPick): PickOutcome {
+    const desc = this.directory.resolve(pick.session.sessionId, pick.candidate.name)
+    if (desc === undefined) return undefined
+    return { claim: this.leadingClaim(desc, pick.session) }
   }
 
   /** Decision table, menu column: popup, required input claim, or detached bare execute. */

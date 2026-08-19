@@ -52,6 +52,15 @@ describe('app-shell assembly plugin', () => {
     expect(second.getByTestId('root-probe')).toBeTruthy()
   })
 
+  it('keeps an already-materialized React tree usable through a service reload gap', async () => {
+    const { ctx, slots, fiber } = await bench()
+    slots.register({ name: 'root' }, () => <div data-testid="root-probe" />)
+    const app = ctx.get('appShell')!.renderApp()
+    await stabilize(() => fiber.dispose())
+    const view = render(<>{app}</>)
+    expect(view.getByTestId('root-probe')).toBeTruthy()
+  })
+
   it('fiber dispose retracts the service and uninstalls the renderer', async () => {
     const { ctx, slots, fiber } = await bench()
     await stabilize(() => fiber.dispose())

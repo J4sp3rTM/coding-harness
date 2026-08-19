@@ -171,11 +171,33 @@ export class InputTriggerController {
     this.execute(outcome, hit.span)
   }
 
+  /** Complete the highlighted token through a source outcome or literal text. */
+  private complete(source: string, index: number): void {
+    const state = this.menu.getSnapshot()
+    const hit = this.hit
+    if (this.disposed || !state.open || hit === null) return
+    const group = state.groups.find(g => g.source === source)
+    const candidate = group !== undefined && group.status === 'ready' ? group.items[index] : undefined
+    if (candidate === undefined) return
+    const src = this.deps.roster.sources(hit.trigger).find(item => item.name === source)
+    if (src === undefined) return
+    const outcome = src.onComplete?.({
+      candidate,
+      session: this.project(),
+      position: hit.position,
+      via: 'tab',
+      span: hit.span,
+    }) ?? { text: `${hit.trigger}${candidate.name} ` }
+    this.stopFetch()
+    this.reduce({ type: 'close' })
+    this.execute(outcome, hit.span)
+  }
+
   /**
    * Keyboard arbitration while the menu is open.
    * @param key - intercepted key.
    * @param composing - inside IME composition: everything passes.
-   * @returns consumed / pick-highlighted / pass.
+   * @returns consumed / pick-highlighted (Enter executes; Tab completes) / pass.
    */
   arbitrate(key: ArbitrateKey, composing: boolean): ArbitrateOutcome {
     if (composing || this.disposed) return 'pass'
@@ -194,6 +216,11 @@ export class InputTriggerController {
         this.stopFetch()
         this.reduce({ type: 'close' })
         return 'consumed'
+      }
+      case 'tab': {
+        if (state.highlight === null) return 'pass'
+        this.complete(state.highlight.source, state.highlight.index)
+        return 'pick-highlighted'
       }
       case 'enter': {
         if (state.highlight === null) return 'pass'

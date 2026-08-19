@@ -34,6 +34,7 @@
  */
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
+import type { ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as ModulesClient from '@deepseek-ai/dsh-client-modules/client'
 import {
@@ -76,6 +77,7 @@ export class AppWebEntry {
   private modules!: ClientModuleSystem
   private manifest!: BootManifest
   private root: Root | undefined
+  private renderApp: (() => ReactNode) | undefined
 
   /**
    * Hold the mount point; all work happens in {@link run}.
@@ -88,57 +90,62 @@ export class AppWebEntry {
   }
 
   /**
-   * Run the boot chain to settlement. Boot-chain failures resolve (not
-   * reject): the loading page stays up and renders the failure report (the
-   * fail-loud surface the kernel owns). Rejects only when the boot manifest
-   * is missing or malformed — there is nothing to boot against.
+   * Run the boot chain to settlement. Every failure resolves after rendering a
+   * shell-owned report; the failure page does not depend on the plugin graph.
    * @returns resolves once the UI settled or the failure report rendered.
    */
   async run(): Promise<void> {
-    this.manifest = parseBootManifest((globalThis as DshWindow).__DSH_BOOT__)
-
-    this.modules = new ClientModuleSystem({
-      modules: this.manifest.modules, staticModules: getStaticModules(), ...this.seams,
-    })
-    // The app-shell assembly is the only shell-own module: every other graph
-    // row is a plugin bundle arriving through fetch.
-    this.modules.registerStatic(APP_SHELL_ID, AppShell)
-    // Adoption handoff, supply side: register the modules
-    // package's own client half under its bare package name (= graph row id
-    // = entry name — a suffixed key would miss the statics branch and
-    // trigger a real fetch), and put the instance on the kernel slot the
-    // wrapper's apply reads to provide ctx.modules.
-    this.modules.registerStatic(MODULES_ID, ModulesClient)
-    ;(globalThis as DshWindow).__DSH_MODULES__ = this.modules
-
-    this.root = createRoot(this.el)
-    this.root.render(
-      <AppRoot
-        settled={this.settled}
-        status={this.status}
-        error={this.error}
-        renderApp={() => {
-          const shell = this.ctx.get('appShell')
-          // Unreachable after a clean settle (the app-shell entry is in every graph).
-          if (shell === undefined) throw new Error('web boot: appShell service missing after settled')
-          return shell.renderApp()
-        }}
-      />,
-    )
-
-    // The immediately tier prefetches in parallel with Loader mounting;
-    // runPluginBoot awaits it before creating entries (see module comment:
-    // cross-package synchronous require edges need every immediately-tier
-    // factory registered before any materialization).
-    const prefetching = this.prefetchImmediateTier()
-    this.ctx = new Context()
     try {
+      // Mount the independent loading/failure shell before reading host data so
+      // a missing or malformed manifest cannot leave an empty document.
+      this.root = createRoot(this.el)
+      this.root.render(
+        <AppRoot
+          settled={this.settled}
+          status={this.status}
+          error={this.error}
+          renderApp={() => {
+            const renderApp = this.renderApp
+            // Settled is published only after this closure is captured.
+            if (renderApp === undefined) throw new Error('web boot: assembled app missing after settled')
+            return renderApp()
+          }}
+        />,
+      )
+
+      this.manifest = parseBootManifest((globalThis as DshWindow).__DSH_BOOT__)
+      this.modules = new ClientModuleSystem({
+        modules: this.manifest.modules, staticModules: getStaticModules(), ...this.seams,
+      })
+      // The app-shell assembly is the only shell-own module: every other graph
+      // row is a plugin bundle arriving through fetch.
+      this.modules.registerStatic(APP_SHELL_ID, AppShell)
+      // Adoption handoff, supply side: register the modules package's own
+      // client half and publish the instance read by its wrapper apply.
+      this.modules.registerStatic(MODULES_ID, ModulesClient)
+      ;(globalThis as DshWindow).__DSH_MODULES__ = this.modules
+
+      // The immediately tier prefetches in parallel with Loader mounting;
+      // runPluginBoot awaits it before creating entries.
+      const prefetching = this.prefetchImmediateTier()
+      this.ctx = new Context()
       await this.runPluginBoot(prefetching)
+      const shell = this.ctx.get('appShell')
+      if (shell === undefined) throw new Error('web boot: appShell service missing at settlement')
+      // Materialize the root while the app-shell inject set is active. HMR may
+      // temporarily retract that service while reloading one of its providers;
+      // the already-built React tree remains the stable shell through the gap.
+      const app = shell.renderApp()
+      this.renderApp = () => app
       this.settled.set(true)
     } catch (reason) {
-      // Stay on the loading page; surface the sweep report (fail loud).
       console.error(reason)
-      this.error.set(reason instanceof Error ? reason.message : String(reason))
+      const message = reason instanceof Error ? reason.message : String(reason)
+      if (this.root === undefined) {
+        this.el.textContent = `Failed to start Harness: ${message}`
+      } else {
+        this.error.set(message)
+      }
     }
   }
 

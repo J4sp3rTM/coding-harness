@@ -64,3 +64,13 @@
   line-height: 18px;
   color: var(--dsw-alias-label-secondary, #61666b);
 }
+
+.reload {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%));
+  border-radius: 6px;
+  color: var(--dsw-alias-label-primary, #0f1115);
+  background: var(--dsw-alias-bg-elevated, #fff);
+  cursor: pointer;
+}

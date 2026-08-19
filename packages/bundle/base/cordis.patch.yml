@@ -314,6 +314,19 @@
     - id: command-login
       name: '@deepseek-ai/dsh-command-login'
 
+    # Human `/clear`: shadow the whole model-visible surface behind one fixed
+    # checkpoint, keeping the session and its durable log. The next prompt
+    # starts fresh without a new session.
+    - id: command-clear
+      name: '@deepseek-ai/dsh-command-clear'
+
+    # Human `/rat`: append a durable per-session custom system prompt rendered
+    # for the receiving agent; run with no text to remove it.
+    - id: command-rat
+      name: '@deepseek-ai/dsh-command-rat'
+      config:
+        maxBytes: 65536
+
     - id: subagent
       name: '@deepseek-ai/dsh-subagent'
 

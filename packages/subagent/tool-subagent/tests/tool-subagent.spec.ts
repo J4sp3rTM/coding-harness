@@ -1064,43 +1064,31 @@ describe('dsh-tool-subagent continuable background mode', () => {
     })).toEqual({ kind: 'parallel' })
   })
 
-  it('defaults continuable delegation to background and returns only its durable id', async () => {
+  it('defaults continuable delegation to foreground and returns its result', async () => {
     const { ctx, parent } = await continuableSetup()
     const schema = ctx.tools.schemas().find(s => s.name === 'subagent')!
-    // Continuable delegation has no Task, so the schema promises no collection.
     expect(schema.description).not.toContain('job_output')
     expect(schema.description).not.toContain('job_kill')
-    expect(schema.description).toContain('send_message')
-    expect(schema.description).toContain('runs in the background by default')
-    expect(schema.description).not.toContain('never poll or wait on it')
+    expect(schema.description).toContain('waits for the subagent result by default')
     const properties = (schema.parameters as {
       properties: Record<string, { description?: string }>
     }).properties
-    expect(properties.run_in_background?.description).toContain('Defaults to true')
+    expect(properties.run_in_background?.description).toContain('Defaults to false')
     const assembly = await ctx.systemPrompt.assemble(assembleContextFor(parent))
     const guidance = assembly.sections.find(section => section.name === 'tool:subagent')
-    expect(guidance?.text).toContain('Use subagent in the background by default')
-    expect(guidance?.text).toContain('runtime sends you a notice containing its outcome')
+    expect(guidance?.text).toContain('Use subagent in the foreground by default')
+    expect(guidance?.text).toContain('parent waits for all results')
 
-    const started = await callSubagent(
+    const result = await callSubagent(
       ctx,
       { description: 'continuable work', prompt: 'dig in' },
       { agent: parent },
     )
-    expect(started.isError).toBe(false)
-    const match = /^started subagent (\S+)$/.exec(text(started))
-    expect(match).not.toBeNull()
-    const [, childId] = match!
-    // No Task was created for the continuable child.
+    expect(result.isError).toBe(false)
+    if (result.isError) throw new Error('expected foreground subagent success')
+    expect(result.value).toMatchObject({ kind: 'foreground' })
+    expect(text(result)).toBe('continuable answer')
     expect(ctx.jobs.list(parent)).toEqual([])
-
-    await vi.waitFor(() => {
-      expect(ctx.agents.get(SessionId(childId!))).toBeUndefined()
-    }, { timeout: 5_000 })
-    // The child id names a durable session carrying its continuation descriptor.
-    const loaded = await ctx.sessionPersistence.load(SessionId(childId!))
-    expect(loaded.events.some(event => event.type === 'subagent/descriptor')).toBe(true)
-    expect(loaded.events.some(event => event.type === 'assistant/message')).toBe(true)
   })
 
   it('hides continuable guidance when the current agent cannot see the tool', async () => {
@@ -1112,17 +1100,15 @@ describe('dsh-tool-subagent continuable background mode', () => {
     expect(assembly.sections.find(section => section.name === 'tool:subagent')?.text).toBe('')
   })
 
-  it('waits for a continuable provider only when run_in_background is explicitly false', async () => {
+  it('allows explicit background execution for independent continuable work', async () => {
     const { ctx, parent } = await continuableSetup()
     const result = await callSubagent(
       ctx,
-      { description: 'blocking work', prompt: 'dig in', run_in_background: false },
+      { description: 'independent work', prompt: 'dig in', run_in_background: true },
       { agent: parent },
     )
     expect(result.isError).toBe(false)
-    if (result.isError) throw new Error('expected foreground subagent success')
-    expect(result.value).toMatchObject({ kind: 'foreground' })
-    expect(text(result)).toBe('continuable answer')
+    expect(text(result)).toMatch(/^started subagent \S+$/)
     expect(ctx.jobs.list(parent)).toEqual([])
   })
 

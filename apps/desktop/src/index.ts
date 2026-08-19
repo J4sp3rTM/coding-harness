@@ -15,10 +15,12 @@
  * @module @deepseek-ai/dsh-desktop
  */
 
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { app, BrowserWindow, protocol, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, dialog, protocol, shell } from 'electron'
 import { loadLayeredEnv } from '@deepseek-ai/dsh-app-boot'
+import { WindowRecovery, type WindowFailure } from './window-recovery.ts'
 import { toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 import { runProfile } from '@deepseek-ai/dsh/profile-boot'
 import type { Context } from '@deepseek-ai/cordis'
@@ -34,6 +36,42 @@ const ORIGIN = `${SCHEME}://app`
 const EVENT_PATHS = ['/api/events.mux', '/api/events.host']
 
 const here = dirname(fileURLToPath(import.meta.url))
+const APP_URL = `${ORIGIN}/index.html`
+const recoveries = new Map<BrowserWindow, WindowRecovery>()
+let logFile: string | undefined
+
+/** Keep native Chromium crash dumps local; this application uploads none. */
+crashReporter.start({ uploadToServer: false, compress: false })
+
+/** Record one desktop lifecycle fact locally and on stderr. */
+function logDesktop(event: string, detail: string): void {
+  const line = `${new Date().toISOString()} ${event} ${detail}`
+  console.error(`[dsh-desktop] ${event}: ${detail}`)
+  if (logFile === undefined) return
+  try {
+    appendFileSync(logFile, `${line}\n`, 'utf8')
+  } catch (error) {
+    console.error('[dsh-desktop] failed to write diagnostic log:', error)
+  }
+}
+
+/** Ask what to do after bounded renderer recovery is exhausted. */
+async function promptRecovery(window: BrowserWindow, failure: WindowFailure): Promise<'reload' | 'quit'> {
+  const options = {
+    type: 'error' as const,
+    title: 'DeepSeek Harness UI stopped',
+    message: 'The Harness UI could not recover, but agents may still be running.',
+    detail: `${failure.kind}: ${failure.detail}\n\nDiagnostics: ${logFile ?? 'stderr'}`,
+    buttons: ['Reload UI', 'Quit'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  }
+  const result = window.isDestroyed()
+    ? await dialog.showMessageBox(options)
+    : await dialog.showMessageBox(window, options)
+  return result.response === 1 ? 'quit' : 'reload'
+}
 
 /**
  * Declare the app scheme before Electron starts.
@@ -104,14 +142,51 @@ function openWindow(): void {
       contextIsolation: true,
     },
   })
+  const recovery = new WindowRecovery({
+    now: Date.now,
+    load: async () => {
+      if (window.isDestroyed()) throw new Error('window was destroyed before UI recovery')
+      await window.loadURL(APP_URL)
+    },
+    log: logDesktop,
+    prompt: failure => promptRecovery(window, failure),
+    quit: () => { app.quit() },
+    setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+    clearTimer: (timer) => { clearTimeout(timer) },
+  })
+  recoveries.set(window, recovery)
+
   window.once('ready-to-show', () => { window.show() })
+  window.once('close', () => { recovery.stop() })
+  window.once('closed', () => {
+    recovery.stop()
+    recoveries.delete(window)
+  })
+  window.webContents.on('did-finish-load', () => { recovery.loaded() })
+  window.webContents.on('did-fail-load', (_event, errorCode, description, url, isMainFrame) => {
+    // Chromium reports ERR_ABORTED (-3) when a newer navigation supersedes an
+    // older one. It is not a failed final document and must not start recovery.
+    if (!isMainFrame || errorCode === -3) return
+    recovery.report({ kind: 'load', detail: `${description} (${String(errorCode)}) at ${url}` })
+  })
+  window.webContents.on('render-process-gone', (_event, details) => {
+    recovery.report({ kind: 'renderer', detail: `${details.reason} (exit ${String(details.exitCode)})` })
+  })
+  window.webContents.on('unresponsive', () => {
+    logDesktop('renderer-unresponsive', APP_URL)
+  })
+  window.webContents.on('responsive', () => {
+    logDesktop('renderer-responsive', APP_URL)
+  })
   // Anything the app points outward (provider sign-in, docs) belongs in the
   // user's real browser, not in an app window with no address bar.
   window.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
   })
-  void window.loadURL(`${ORIGIN}/index.html`)
+  void window.loadURL(APP_URL).catch((error: unknown) => {
+    recovery.report({ kind: 'load', detail: error instanceof Error ? error.message : String(error) })
+  })
 }
 
 /**
@@ -124,14 +199,33 @@ function openWindow(): void {
  */
 async function main(): Promise<void> {
   await app.whenReady()
+  const logs = app.getPath('logs')
+  try {
+    mkdirSync(logs, { recursive: true })
+    logFile = join(logs, 'desktop.log')
+    logDesktop('diagnostics-ready', `${logFile}; crash dumps: ${app.getPath('crashDumps')}`)
+  } catch (error) {
+    console.error('[dsh-desktop] local diagnostics unavailable:', error)
+  }
+
   const ctx = await bootHost()
   protocol.handle(SCHEME, request => route(ctx, request))
   openWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow()
   })
+  app.on('child-process-gone', (_event, details) => {
+    logDesktop('child-process-gone', `${details.type}: ${details.reason} (exit ${String(details.exitCode)})`)
+    if (details.type !== 'GPU' || details.reason === 'clean-exit') return
+    for (const recovery of recoveries.values()) {
+      recovery.report({ kind: 'gpu', detail: `${details.reason} (exit ${String(details.exitCode)})` })
+    }
+  })
 }
 
+app.on('before-quit', () => {
+  for (const recovery of recoveries.values()) recovery.stop()
+})
 app.on('window-all-closed', () => { app.quit() })
 
 main().catch((error: unknown) => {

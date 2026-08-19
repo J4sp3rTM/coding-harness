@@ -13,6 +13,7 @@ import {
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { ClientContext, ConversationSnapshot, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ArbitrateKey, ArbitrateOutcome } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { SessionInputShell } from '../src/client/input/facade.ts'
 import type { ComposerAttachment } from '../src/client/contract/slots.ts'
 import type { DraftAttachmentId } from '../src/client/input/contract.ts'
@@ -55,6 +56,8 @@ interface BenchOptions {
   modelEntry?: React.ReactNode
   /** Hot text-ref lexicon (injects a minimal slash stub exposing only lexicon()). */
   lexicon?: ReadonlyMap<'/' | '@', readonly string[]>
+  /** Menu keyboard verdict (injects the minimal slash arbitration face). */
+  arbitrate?: (key: ArbitrateKey, composing: boolean) => ArbitrateOutcome
   permissions?: { options: { value: string; name: string; description?: string }[]; currentValue: string }
   /** The `imageLimits` projection value (absent = no attachment service). */
   imageLimits?: {
@@ -103,6 +106,8 @@ function row(id: string): ConversationSnapshot['queue'][number] {
 function bench(over?: BenchOptions) {
   const sink = vi.fn()
   const lex = over?.lexicon
+  const triggerLexicon = lex ?? new Map<'/' | '@', readonly string[]>()
+  const menuArbitrate = over?.arbitrate
   const session = createSnapshotStore<ConversationSnapshot>(snapshotOf({
     running: over?.running ?? false,
     subagent: over?.subagent ?? null,
@@ -119,12 +124,12 @@ function bench(over?: BenchOptions) {
       subscribe: fn => session.subscribe(fn),
     },
     ...(over?.steerQueue !== undefined ? { steerQueue: over.steerQueue } : {}),
-    // Lexicon-only stub: adjudication untouched (undefined slash methods are
-    // never reached — these benches drive plain-draft flows only).
-    ...(lex !== undefined
+    // Minimal trigger stub: only the requested browser-facing seam is exposed.
+    ...(lex !== undefined || menuArbitrate !== undefined
       ? {
         inputTriggers: (() => ({
-          lexicon: { getSnapshot: () => lex, subscribe: () => () => {} },
+          lexicon: { getSnapshot: () => triggerLexicon, subscribe: () => () => {} },
+          ...(menuArbitrate !== undefined ? { arbitrate: menuArbitrate } : {}),
         })) as unknown as NonNullable<ShellDeps['inputTriggers']>,
       }
       : {}),
@@ -482,6 +487,18 @@ describe('Enter semantics', () => {
     const empty = bench({ draft: '   ' })
     fireEvent.keyDown(empty.textarea, { key: 'Enter' })
     expect(empty.sink).not.toHaveBeenCalled()
+  })
+
+  it('plain Tab selects the best menu candidate and prevents native focus navigation', () => {
+    const arbitrate = vi.fn<NonNullable<BenchOptions['arbitrate']>>(() => 'pick-highlighted')
+    const { textarea } = bench({ arbitrate })
+    expect(fireEvent.keyDown(textarea, { key: 'Tab' })).toBe(false)
+    expect(arbitrate).toHaveBeenCalledExactlyOnceWith('tab', false)
+
+    const modifiedArbitrate = vi.fn(() => 'pick-highlighted' as const)
+    const modified = bench({ arbitrate: modifiedArbitrate })
+    expect(fireEvent.keyDown(modified.textarea, { key: 'Tab', shiftKey: true })).toBe(true)
+    expect(modifiedArbitrate).not.toHaveBeenCalled()
   })
 
   it('non-Enter keys and Shift+Enter fall through to native behavior', () => {

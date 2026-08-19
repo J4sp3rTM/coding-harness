@@ -26,8 +26,8 @@ export type TriggerChar = '/' | '@'
 /** Where the trigger token sits in the draft: leading (trimmed draft starts with it) or inline. */
 export type TriggerPosition = 'leading' | 'inline'
 
-/** Which of the three pick paths produced a pick. */
-export type PickVia = 'menu' | 'space' | 'enter'
+/** Which pick path produced a pick. */
+export type PickVia = 'menu' | 'tab' | 'space' | 'enter'
 
 /** One menu candidate. Pure display data — zero behavior declaration. */
 export interface InputTriggerCandidate {
@@ -142,8 +142,10 @@ export interface InputTriggerSource {
   /** Menu group display order (lower = higher in the list; default 0). */
   readonly order?: number
   candidates(session: ClientSessionContext, req: CandidateRequest): Promise<readonly InputTriggerCandidate[]>
-  /** Every pick lands here; claim/insert outcomes are executed by the pipeline via the scoped input events. */
+  /** Explicit menu picks land here; claim/insert outcomes are executed by the pipeline via scoped input events. */
   onPick(pick: InputTriggerPick): PickOutcome
+  /** Optional Tab completion outcome; undefined uses literal trigger text. */
+  onComplete?(pick: InputTriggerPick): PickOutcome
   /** Synchronous space-time adjudication over hot state only. `token` is the just-completed leading token (e.g. '/goal'). */
   matchSpace?(session: ClientSessionContext, token: string): PickOutcome
   /**
@@ -189,9 +191,9 @@ export interface TriggerGuard {
 }
 
 /** Keys the menu intercepts while open (all behind the IME composition guard). */
-export type ArbitrateKey = 'up' | 'down' | 'enter' | 'escape'
+export type ArbitrateKey = 'up' | 'down' | 'tab' | 'enter' | 'escape'
 
-/** consumed = key handled; pick-highlighted = enter picked the highlight; pass = let the input see it. */
+/** consumed = key handled; pick-highlighted = Enter picked or Tab completed the highlight; pass = let the input see it. */
 export type ArbitrateOutcome = 'consumed' | 'pick-highlighted' | 'pass'
 
 /** Request payload of the scoped begin-command input event. */

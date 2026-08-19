@@ -193,6 +193,7 @@ describe('registration', () => {
     const { registered, source, fiber } = await bench()
     expect(typeof source.matchSpace).toBe('function')
     expect(typeof source.matchEnter).toBe('function')
+    expect(typeof source.onComplete).toBe('function')
     expect(typeof source.warm).toBe('function')
     expect([...registered.keys()]).toEqual(['/ command'])
     await fiber.dispose()
@@ -371,6 +372,19 @@ describe('dispatch (menu column)', () => {
     const { source, warm, executeCalls } = await bench()
     await warm(proj('s1'))
     const outcome = menuPick(source, 'goal', proj('s1'))
+    if (outcome === undefined || outcome === 'handled' || !('claim' in outcome)) throw new Error('expected claim')
+    expect(outcome.claim.token).toBe('/goal ')
+    expect(outcome.claim.hint).toBe('goal text')
+    expect(executeCalls).toEqual([])
+  })
+
+  it('Tab completion → {claim} marks the host token without executing', async () => {
+    const { source, warm, executeCalls } = await bench()
+    await warm(proj('s1'))
+    const outcome = source.onComplete!({
+      candidate: { name: 'goal' }, session: proj('s1'), position: 'leading', via: 'tab',
+      span: { start: 0, end: 5, draftRev: 3 },
+    })
     if (outcome === undefined || outcome === 'handled' || !('claim' in outcome)) throw new Error('expected claim')
     expect(outcome.claim.token).toBe('/goal ')
     expect(outcome.claim.hint).toBe('goal text')

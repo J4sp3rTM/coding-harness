@@ -8,8 +8,8 @@
  * loading page, lists the per-entry fiber states and the sweep report (fail
  * loud, no partial UI).
  */
-import { useSyncExternalStore } from 'react'
-import type { ReactNode } from 'react'
+import { Component, useSyncExternalStore } from 'react'
+import type { ErrorInfo, ReactNode } from 'react'
 import type { KernelSignal, LoaderStatus } from './loader-status.ts'
 import css from './AppRoot.module.css'
 
@@ -25,6 +25,45 @@ export interface AppRootProps {
   renderApp: () => ReactNode
 }
 
+/** Top-level settled-UI failure state. */
+interface AppFailureState {
+  error?: string
+}
+
+/** Shell-owned last-resort boundary for failures above the per-slot boundaries. */
+class AppFailureBoundary extends Component<{ children: ReactNode }, AppFailureState> {
+  override state: AppFailureState = {}
+
+  static getDerivedStateFromError(error: unknown): AppFailureState {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+
+  override componentDidCatch(error: unknown, info: ErrorInfo): void {
+    console.error('web app render failed', error, info.componentStack)
+  }
+
+  override render(): ReactNode {
+    if (this.state.error === undefined) return this.props.children
+    return (
+      <div className={css.boot}>
+        <div className={css.card}>
+          <div className={css.wordmark}>HARNESS</div>
+          <div className={css.failed}>
+            <div className={css.failedTitle}>The interface stopped unexpectedly</div>
+            <div className={css.failedItem}>{this.state.error}</div>
+            <button className={css.reload} type="button" onClick={() => { globalThis.location.reload() }}>Reload UI</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+}
+
+/** Invoke the deferred app renderer below the last-resort error boundary. */
+function SettledApp(props: Pick<AppRootProps, 'renderApp'>): ReactNode {
+  return <>{props.renderApp()}</>
+}
+
 /** Boot gate: loading page until the boot settles; failures stay here. */
 export function AppRoot(props: AppRootProps) {
   const settled = useSyncExternalStore(props.settled.subscribe, props.settled.getSnapshot)
@@ -32,7 +71,13 @@ export function AppRoot(props: AppRootProps) {
   const error = useSyncExternalStore(props.error.subscribe, props.error.getSnapshot)
   const failed = Object.entries(status).filter(([, s]) => s === 'failed')
 
-  if (settled) return <>{props.renderApp()}</>
+  if (settled) {
+    return (
+      <AppFailureBoundary>
+        <SettledApp renderApp={props.renderApp} />
+      </AppFailureBoundary>
+    )
+  }
 
   const loud = error !== undefined || failed.length > 0
 

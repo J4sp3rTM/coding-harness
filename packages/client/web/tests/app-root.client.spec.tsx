@@ -7,7 +7,7 @@
  * gate semantics. Stores are the kernel-own signals production boot uses
  * (shell self-sufficiency: the loading page depends on no plugin package).
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
 
 afterEach(cleanup)
@@ -72,5 +72,24 @@ describe('AppRoot', () => {
     expect(getByTestId('real-ui')).toBeTruthy()
     expect(queryByText('HARNESS')).toBeNull()
     expect(counts()).toBe(1)
+  })
+
+  it('renders a reloadable shell failure when the settled app throws', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const preventJsdomReport = (event: ErrorEvent): void => { event.preventDefault() }
+    window.addEventListener('error', preventJsdomReport)
+    const utils = render(
+      <AppRoot
+        settled={createSignal(true)}
+        status={createLoaderStatusStore()}
+        error={createSignal<string | undefined>(undefined)}
+        renderApp={() => { throw new Error('layout exploded') }}
+      />,
+    )
+    window.removeEventListener('error', preventJsdomReport)
+    expect(utils.getByText('The interface stopped unexpectedly')).toBeTruthy()
+    expect(utils.getByText('layout exploded')).toBeTruthy()
+    expect(utils.getByRole('button', { name: 'Reload UI' })).toBeTruthy()
+    expect(consoleError).toHaveBeenCalled()
   })
 })

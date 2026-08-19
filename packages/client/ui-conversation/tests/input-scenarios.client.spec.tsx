@@ -63,6 +63,10 @@ function commandSource(commands: FakeCommand[], execute: (line: string) => Promi
         void execute(`/${desc.name}`)
         return 'handled'
       },
+      onComplete: (pick: { candidate: { name: string } }): PickOutcome => {
+        const desc = resolve(pick.candidate.name)
+        return desc === undefined ? undefined : { claim: leadingClaim(desc) }
+      },
       matchSpace: (_session: ClientSessionContext, token: string): PickOutcome => {
         const desc = resolve(token.slice(1))
         if (desc?.input === undefined) return undefined
@@ -111,6 +115,7 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
   // The hub's listener wiring, verbatim.
   actx.on('slash/input-begin-command', req => shell.beginCommand(req.claim, req.span) ? true : undefined)
   actx.on('slash/input-insert-reference', req => shell.insertReference(req.reference, req.span) ? true : undefined)
+  actx.on('slash/input-insert-text', req => shell.insertText(req.text, req.span) ? true : undefined)
   actx.on('slash/input-consume-token', req => shell.consumeToken(req.guard) ? true : undefined)
   const wiring = shell
   const sessionStore = createSnapshotStore<ConversationSnapshot>({
@@ -201,6 +206,21 @@ describe('scenario A: menu-pick /goal, type args, enter submits', () => {
     await vi.waitFor(() => { expect(b.textarea.value).toBe('') })
     expect(b.shell.snapshot.phase).toBe('plain')
     expect(b.view.getByText('已执行 /goal 发布 v1')).toBeTruthy()
+    expect(b.sink).not.toHaveBeenCalled()
+  })
+})
+
+describe('scenario: Tab completes without executing', () => {
+  it('puts the best command in the textarea and leaves execution untouched', async () => {
+    const b = await bench()
+    b.type('/comp')
+    await vi.waitFor(() => { expect(b.controller.menu.getSnapshot().open).toBe(true) })
+    fireEvent.keyDown(b.textarea, { key: 'Tab' })
+    expect(b.textarea.value).toBe('/compact ')
+    expect(b.shell.snapshot.phase).toBe('claimed')
+    expect(b.view.container.querySelector('[data-decoration="token"]')?.textContent).toBe('/compact ')
+    expect(b.executed).toHaveLength(0)
+    expect(b.execute).not.toHaveBeenCalled()
     expect(b.sink).not.toHaveBeenCalled()
   })
 })

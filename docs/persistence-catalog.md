@@ -529,6 +529,19 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 
 Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
 
+### `rat/*`
+
+<a id="ratprompt--log-only"></a>
+
+#### `rat/prompt` — log-only
+
+```ts persistence-catalog
+/** Last-wins custom system-prompt value; null removes the section. */
+'rat/prompt': { text: string | null }
+```
+
+Source: [`packages/context/command-rat/src/index.ts:28`](../packages/context/command-rat/src/index.ts)
+
 ### `request/*`
 
 <a id="requestcontext--log-only"></a>
