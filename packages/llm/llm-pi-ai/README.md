@@ -10,11 +10,18 @@ The package root exposes the Cordis plugin contract, `PiAiAdapter`, and `support
 
 Configure credentials, the model catalog, and deployment-specific transport settings per provider, keyed by the provider route itself. `apiKeyEnv` is a credential *reference* resolved per request, so no secret enters this file. Omitting it leaves the route unauthenticated, which for an installed catalog route means pi-ai's provider-native ambient discovery; a configured reference that resolves to nothing fails the request with `MISSING_CREDENTIAL` instead, because falling through would authenticate with whatever unrelated key the environment happens to hold. One credential serves every model on its route.
 
+`auth` picks between the key path and a provider subscription. It is optional, and the default is what makes signing in enough: with `auth` unset, a route holding a stored sign-in on [`ctx.llmOAuth`](../llm-oauth/README.md) authenticates with the subscription, and one that does not takes the key path — so `/login anthropic` moves that route onto a Claude Pro/Max plan and `/logout anthropic` moves it back, with nothing in `settings.yaml` changing either time. Naming a mode pins it: `subscription` refuses the request with `MISSING_SUBSCRIPTION` rather than falling back to a key when nobody is signed in, and `api-key` ignores a stored sign-in. Only a route the installed catalog ships an OAuth method for may name `subscription`; anything else is refused where it is written.
+
 ```yaml
 - id: llm
   name: '@deepseek-ai/dsh-llm-pi-ai'
   config:
     providers:
+      # Subscription route: the models come from pi-ai and the credential from
+      # a sign-in. Written out here only to pin the mode; with `auth` omitted,
+      # signing in is enough.
+      openai-codex:
+        auth: subscription
       # Catalog route: endpoint, protocol, and models all come from pi-ai.
       openai:
         apiKeyEnv: OPENAI_API_KEY
@@ -151,7 +158,9 @@ Durable content is the authoritative record; replay state only restores native f
 
 ## App attribution
 
-Every request carries the shared attribution header from dsh-llm's `attributionHeaders()`, merged through pi-ai's `headers` stream option. Provider-specific app-attribution headers are not synthesized. See [dsh-llm § App attribution](../llm/README.md#app-attribution-attributionts).
+Every api-key request carries the shared attribution header from dsh-llm's `attributionHeaders()`, merged through pi-ai's `headers` stream option. Provider-specific app-attribution headers are not synthesized. See [dsh-llm § App attribution](../llm/README.md#app-attribution-attributionts).
+
+A subscription request does not. The OAuth path of a provider that offers one sends its own client identity — the Anthropic path sends a CLI user agent alongside the `anthropic-beta` opt-ins its endpoint requires, and prepends the identity preamble the same endpoint requires — as ordinary request headers. Harness attribution is merged last and would replace that user agent, so every such request would be refused. The token itself identifies the client to the provider that issued it, which is the fact attribution exists to carry, so it is withheld rather than sent alongside a broken identity. This is the one path on which attribution does not travel.
 
 ## Dependency weight
 
@@ -189,7 +198,7 @@ Recorded response content appends to the next request and does not invalidate it
 
 ## Known Limitations and Deferred Work
 
-- **A provider that authenticates through OAuth alone is not offered** — pi-ai resolves OAuth from a *stored* OAuth credential, and this adapter builds its `Models` collection with no credential store and runs no login flow, so every request on such a route fails `Provider is not configured` before it goes out. The configurable-provider directory withholds them; `openai-codex` is the only one the installed catalog ships. A route a settings document already names keeps its entry so a configuration surface can edit or delete it, and `apiKeyEnv` still authenticates it with that key — which for Codex is a token that expires with nothing here to refresh it.
+- **A subscription route needs the sign-in seam composed** — pi-ai resolves OAuth from a *stored* credential and has no ambient path for one, so this adapter's collection reads through `ctx.llmOAuth`. A deployment composing no sign-in service leaves every route on the key path, and a route whose only method is OAuth (`openai-codex` is the one the installed catalog ships) fails `Provider is not configured` there. Only a route the catalog ships an OAuth method for can be signed into at all: a hand-declared gateway has no flow, so `auth: subscription` on one is refused where it is written.
 - **Provider-native discovery reads the process environment only** — a route naming no credential defers to the catalog provider's own resolution, which interrogates environment variables (`AZURE_OPENAI_API_KEY`, `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`, and each provider's own set). It reads no local credential directory, so `~/.aws/credentials` without an exported `AWS_PROFILE` resolves as unconfigured, and a value held by the harness credential seam is invisible to it unless the process environment carries it too.
 - **Settings can add or override routes, not remove composition routes** — the user layer merges over the composition `base`, so deleting a `cordis.yml`-provided provider is a composition change; `replace` on the namespace only resets the user layer.
 - **The layered merge has no delete for dict keys** — the settings seam merges the composition `base` and the user layer per key, recursively, so a `reasoningEfforts` level, `modelOverrides` entry, or `compat` field the base declares cannot be removed by the user layer, only overridden — and for `reasoningEfforts` absence *is* the meaning ("not offered"), so a base-declared level stays offered. This only triggers when a `cordis.yml` entry config declares per-model reasoning fields for the same model the user layer edits; the supported posture is to leave those to the settings document (the shipped composition mounts the adapter dormant), and a `models` list is an array replacing wholesale, which is the in-band escape.

@@ -408,6 +408,17 @@ describe('catalog routes with per-model configuration', () => {
       .toEqual(getBuiltinModels('deepseek').map(model => model.id).sort())
   })
 
+  it('lists Grok 4.6 from the installed xAI catalog', () => {
+    const resolved = resolveProfiles({ xai: {} }).get('xai')?.piProvider.getModels() ?? []
+    const model = resolved.find(candidate => candidate.id === 'grok-4.6')
+
+    expect(model).toMatchObject({
+      id: 'grok-4.6',
+      name: 'Grok 4.6',
+      provider: 'xai',
+    })
+  })
+
   it('overrides one catalog model field and defaults the rest from the catalog', async () => {
     const server = await mockServer([])
     const [catalogModel] = getBuiltinModels('deepseek')
@@ -636,7 +647,7 @@ describe('per-model reasoning efforts', () => {
   it('narrows a catalog model’s levels in place', () => {
     const [catalogModel] = getBuiltinModels('deepseek')
     if (catalogModel === undefined) throw new Error('the installed catalog ships no deepseek model')
-    expect(getSupportedThinkingLevels(catalogModel as Model<Api>)).toEqual(['off', 'high', 'max'])
+    expect(getSupportedThinkingLevels(catalogModel as Model<Api>)).toEqual(['off', 'low', 'high', 'max'])
 
     const model = modelOf({
       deepseek: { models: [{ id: catalogModel.id, reasoningEfforts: { off: null, high: 'high' } }] },
@@ -838,7 +849,7 @@ describe('resolution snapshots', () => {
       profiles: () => current,
       // Credential resolution is the real await inside a stream call, and the
       // window a configuration change has to land in.
-      resolveApiKey: async () => { await held; return 'k' },
+      resolveAuth: async () => { await held; return { subscription: false, apiKey: 'k' } },
     })
 
     const chunks: StreamChunk[] = []
@@ -867,7 +878,7 @@ describe('resolution snapshots', () => {
     const first = await mockServer([{ events: textEvents }])
     const second = await mockServer([{ events: textEvents }])
     let current = resolveProfiles({ deepseek: { baseURL: `${first.url}/v1` } })
-    const adapter = new PiAiAdapter({ profiles: () => current, resolveApiKey: () => Promise.resolve('k') })
+    const adapter = new PiAiAdapter({ profiles: () => current, resolveAuth: () => Promise.resolve({ subscription: false, apiKey: 'k' }) })
     const drain = async (): Promise<void> => {
       for await (const _chunk of adapter.stream({
         provider: 'deepseek', model: 'deepseek-v4-flash', messages: [],
@@ -934,20 +945,16 @@ describe('configurable-provider directory', () => {
     expect(ctx.llm.listConfigurableProviders()).toHaveLength(catalogOnly)
   })
 
-  it('withholds a catalog route this adapter cannot authenticate', async () => {
+  it('offers a catalog route this adapter can authenticate by either method', async () => {
     const ctx = await harness({})
     const offered = ctx.llm.listConfigurableProviders().map(entry => entry.provider)
 
     // `openai-codex` is the one installed provider that authenticates through
-    // OAuth alone. pi-ai resolves OAuth only from a *stored* credential, this
-    // adapter constructs its collection with no credential store, and nothing
-    // here runs a login flow — so every request on such a route fails with
-    // `Provider is not configured` before it goes out. Offering it would put a
-    // provider on the settings page that no amount of configuration can make
-    // work.
-    expect(offered).not.toContain('openai-codex')
-    // A provider that offers OAuth *beside* an api-key method keeps its entry:
-    // the key is a path this adapter can serve.
+    // OAuth alone. It is offered because the subscription sign-in seam gives
+    // this adapter a way to serve it: a stored token set reaches the request
+    // through the collection's credential store. A route with an api-key
+    // method is offered on the strength of the key alone, as before.
+    expect(offered).toContain('openai-codex')
     expect(offered).toContain('anthropic')
     expect(offered).toContain('openai')
   })

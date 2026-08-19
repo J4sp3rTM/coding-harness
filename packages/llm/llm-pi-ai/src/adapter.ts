@@ -13,10 +13,17 @@
  * way down: switching models mid-reply takes effect on the next step, never
  * inside the one in flight.
  *
- * Credentials stay outside that collection. The harness resolves a route's key
+ * API keys stay outside that collection. The harness resolves a route's key
  * through its own seam and passes it as the request's `apiKey` option, which
- * pi-ai treats as the highest-priority auth override — so `Models` never holds
- * a credential store and the harness keeps its fail-loud reference semantics.
+ * pi-ai treats as the highest-priority auth override, so the harness keeps its
+ * fail-loud reference semantics.
+ *
+ * Subscription tokens cannot travel that way. They rotate, and the rotation is
+ * a read-modify-write pi-ai performs under the store's own lock, so the
+ * collection is built over a credential store that reads through to the
+ * harness sign-in seam. The store is one stable object built here and shared
+ * by every snapshot: the seam may mount after this adapter, and a store
+ * captured before that would leave the collection permanently signed out.
  *
  * @module dsh-llm-pi-ai/adapter
  */
@@ -24,10 +31,13 @@
 import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import type {
   Api,
+  Credential,
+  CredentialStore,
   Model,
   Models,
   ModelThinkingLevel,
   MutableModels,
+  OAuthCredential,
   SimpleStreamOptions,
   ThinkingLevel,
 } from '@earendil-works/pi-ai'
@@ -48,6 +58,7 @@ import type {
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import type { LlmOAuthToken, LlmOAuthTokenStore } from '@deepseek-ai/dsh-llm-oauth'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { toPiContext } from './context.ts'
@@ -61,19 +72,46 @@ interface PiAiSnapshot {
   models: Models
 }
 
-/** Constructor options for {@link PiAiAdapter}: the two resolution hooks the plugin owns. */
+/**
+ * How one request authenticates, decided once per stream call and frozen for
+ * it.
+ */
+export interface PiAiRequestAuth {
+  /**
+   * API key overriding the route's own auth. Absent defers to that auth, which
+   * resolves a stored subscription token first and otherwise falls to the
+   * installed catalog route's provider-native ambient discovery.
+   */
+  apiKey?: string
+  /**
+   * Whether this request authenticates with a stored subscription token.
+   *
+   * Anthropic's OAuth path carries its required CLI identity in request
+   * headers, so that provider withholds harness attribution. Other providers
+   * retain attribution unless their own request implementation replaces it.
+   */
+  subscription: boolean
+}
+
+/** Constructor options for {@link PiAiAdapter}: the resolution hooks the plugin owns. */
 export interface PiAiAdapterOptions {
   /** Current validated profiles by provider route; called once per operation. */
   profiles: () => ReadonlyMap<string, ResolvedPiAiProviderProfile>
   /**
-   * Resolve the credential for one already-resolved profile; called once per
-   * stream call and frozen for that call. `undefined` defers to the route's own
-   * pi-ai auth, which for an installed catalog route is its provider-native
-   * ambient discovery; the plugin allows that only for a profile naming no
-   * credential at all, because a named reference that misses throws `LlmError`
-   * `MISSING_CREDENTIAL` rather than falling back.
+   * Decide how one already-resolved profile authenticates its next request;
+   * called once per stream call and frozen for that call. The plugin defers to
+   * the route's own pi-ai auth only for a profile naming no credential and
+   * holding no subscription token, because a named reference that misses
+   * throws `LlmError` `MISSING_CREDENTIAL` rather than falling back.
    */
-  resolveApiKey: (provider: string, profile: ResolvedPiAiProviderProfile) => Promise<string | undefined>
+  resolveAuth: (provider: string, profile: ResolvedPiAiProviderProfile) => Promise<PiAiRequestAuth>
+  /**
+   * The subscription token store backing this adapter's requests, resolved at
+   * each call so a sign-in seam mounting after the adapter still reaches it.
+   * Omission — and a call answering `undefined` — leaves every route
+   * api-key-only.
+   */
+  resolveTokens?: () => LlmOAuthTokenStore | undefined
   /** Resolve the optional durable attachment service at request time. */
   resolveAttachments?: () => AttachmentStore | undefined
   /**
@@ -173,13 +211,99 @@ function reasoningInfo(
   }
 }
 
-/** Merge deployment headers while removing case-insensitive attribution collisions. */
-function requestHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> {
+/**
+ * The request headers one call sends.
+ *
+ * Requests merge deployment headers under harness attribution, which wins
+ * case-insensitive collisions. Anthropic subscription requests send deployment
+ * headers alone because its OAuth path supplies a CLI user agent that the
+ * endpoint requires and harness attribution would replace.
+ * @param headers - the profile's deployment headers, when any.
+ * @param provider - provider route receiving the request.
+ * @param subscription - whether the call authenticates with a stored subscription token.
+ * @returns the headers to send with the request.
+ */
+function requestHeaders(
+  headers: Readonly<Record<string, string>> | undefined,
+  provider: string,
+  subscription: boolean,
+): Record<string, string> {
+  if (subscription && provider === 'anthropic') return { ...headers }
   const attribution = attributionHeaders()
   const reserved = new Set(Object.keys(attribution).map(name => name.toLowerCase()))
   return {
     ...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
     ...attribution,
+  }
+}
+
+/**
+ * Read one pi-ai credential as a subscription token set.
+ *
+ * pi-ai writes back exactly what its OAuth refresh returned, so anything else
+ * arriving here means the collection was handed a credential kind this store
+ * does not hold. That is a process boundary — the value crossed out of the
+ * vendor SDK — and refusing it keeps an api-key credential from being written
+ * into the subscription document under a route's key.
+ * @param credential - the credential pi-ai asked to store.
+ * @returns the token set to store.
+ * @throws {LlmError} code `UNSUPPORTED_CREDENTIAL` when the credential is not an OAuth one.
+ */
+function toStoredToken(credential: Credential): LlmOAuthToken {
+  if (credential.type !== 'oauth') {
+    throw new LlmError(
+      `llm-pi-ai: the subscription token store was handed a "${credential.type}" credential`,
+      'UNSUPPORTED_CREDENTIAL',
+    )
+  }
+  const { type: _type, access, refresh, expires, ...extra } = credential
+  return { access, refresh, expires, ...Object.keys(extra).length === 0 ? {} : { extra } }
+}
+
+/**
+ * Render a stored token set as the pi-ai credential its auth resolution reads.
+ * @param token - the stored token set, or `undefined` while the route is signed out.
+ * @returns the pi-ai credential, or `undefined`.
+ */
+function toPiCredential(token: LlmOAuthToken | undefined): OAuthCredential | undefined {
+  if (token === undefined) return undefined
+  return { ...token.extra, type: 'oauth', access: token.access, refresh: token.refresh, expires: token.expires }
+}
+
+/**
+ * A pi-ai credential store reading through to the harness sign-in seam.
+ *
+ * The indirection is what lets one store object serve every snapshot: the seam
+ * is resolved per operation, so a sign-in service mounting after this adapter
+ * still reaches the collection, and one disposing leaves it signed out rather
+ * than holding a store nothing backs. A route the harness authenticates with
+ * an api key never reaches this store at all — the request's `apiKey` override
+ * is resolved before pi-ai consults it.
+ * @param resolveTokens - reads the current token store, when a seam supplies one.
+ * @returns the credential store to build the `Models` collection with.
+ */
+function subscriptionCredentialStore(
+  resolveTokens: () => LlmOAuthTokenStore | undefined,
+): CredentialStore {
+  return {
+    read: async provider => toPiCredential(await resolveTokens()?.read(provider)),
+    list: async () => (await resolveTokens()?.list() ?? [])
+      .map(providerId => ({ providerId, type: 'oauth' as const })),
+    modify: async (provider, fn) => {
+      const tokens = resolveTokens()
+      // Nothing to serialize against and nothing to write: answering the
+      // current value (none) is what "signed out" means to pi-ai, which then
+      // reports the provider unconfigured instead of retrying a refresh.
+      if (tokens === undefined) return undefined
+      const stored = await tokens.modify(provider, async (current) => {
+        const next = await fn(toPiCredential(current))
+        return next === undefined ? undefined : toStoredToken(next)
+      })
+      return toPiCredential(stored)
+    },
+    delete: async (provider) => {
+      await resolveTokens()?.delete(provider)
+    },
   }
 }
 
@@ -190,9 +314,12 @@ function requestHeaders(headers: Readonly<Record<string, string>> | undefined): 
  */
 export class PiAiAdapter extends LlmAdapter {
   private snapshot: PiAiSnapshot | undefined
+  /** One store for every snapshot; see the module contract above. */
+  private readonly credentials: CredentialStore
 
   constructor(private readonly config: PiAiAdapterOptions) {
     super()
+    this.credentials = subscriptionCredentialStore(() => this.config.resolveTokens?.())
   }
 
   /**
@@ -204,7 +331,7 @@ export class PiAiAdapter extends LlmAdapter {
   private current(): PiAiSnapshot {
     const profiles = this.config.profiles()
     if (this.snapshot?.profiles === profiles) return this.snapshot
-    const models: MutableModels = createModels()
+    const models: MutableModels = createModels({ credentials: this.credentials })
     for (const profile of profiles.values()) models.setProvider(profile.piProvider)
     this.snapshot = { profiles, models }
     return this.snapshot
@@ -294,7 +421,7 @@ export class PiAiAdapter extends LlmAdapter {
       model,
       options.reasoningEffort ?? profile.reasoning,
     )
-    const apiKey = await this.config.resolveApiKey(options.provider, profile)
+    const auth = await this.config.resolveAuth(options.provider, profile)
 
     const consumer = new AbortController()
     const upstream = options.signal === undefined
@@ -319,16 +446,17 @@ export class PiAiAdapter extends LlmAdapter {
         ? toPiContext(options, undefined, onReplayDegrade)
         : await toPiContext(options, attachments, onReplayDegrade)
       const events = snapshot.models.streamSimple(model, context, {
-        ...profileOptions(profile, reasoning, apiKey),
+        ...profileOptions(profile, reasoning, auth.apiKey),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
         signal: watchdog.signal,
         // Profile headers are deployment-owned; attribution names are
-        // Harness-owned and therefore win collisions.
-        headers: requestHeaders(profile.headers),
+        // Harness-owned and therefore win collisions, except where a provider's
+        // OAuth endpoint requires its own client identity.
+        headers: requestHeaders(profile.headers, options.provider, auth.subscription),
       })
-      const iterator = toStreamChunks(events, model.contextWindow)[Symbol.asyncIterator]()
+      const iterator = toStreamChunks(events, model.contextWindow, options.signal)[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {

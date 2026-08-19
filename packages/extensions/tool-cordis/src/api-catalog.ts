@@ -869,6 +869,51 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'llmOAuth',
+    summary: 'Abstract subscription sign-in service.',
+    description: 'Abstract subscription sign-in service. Providers implement the flows over their own durable store; the store itself is published through LlmOAuthService.tokens so an LLM adapter can hand it to the SDK that rotates the token, without any other consumer being able to read a secret through the seam\'s own methods.',
+    methods: [
+      {
+        signature: 'abstract providers(): readonly LlmOAuthProviderInfo[]',
+        description: 'The provider routes this implementation can sign into.',
+        parameters: [],
+        returns: 'the offered routes, in the order sign-in surfaces should present them.',
+      },
+      {
+        signature: 'abstract accounts(): Promise<readonly LlmOAuthAccount[]>',
+        description: 'Sign-in state of every offered route.',
+        parameters: [],
+        returns: 'one account per offered route, signed in or not.',
+      },
+      {
+        signature: 'abstract status(provider: string): Promise<LlmOAuthAccount>',
+        description: 'Sign-in state of one route.',
+        parameters: [{ name: 'provider', description: 'the provider route key.' }],
+        returns: 'the route\'s account facts.',
+        throws: ['{LlmOAuthError} code `UNKNOWN_PROVIDER` when this implementation does not offer the route.'],
+      },
+      {
+        signature: 'abstract login(provider: string, interaction: LlmOAuthInteraction): Promise<LlmOAuthAccount>',
+        description: 'Run one route\'s sign-in flow and store the token set it returns. A successful sign-in replaces whatever was stored for the route.',
+        parameters: [{ name: 'provider', description: 'the provider route key.' }, { name: 'interaction', description: 'the surface the flow reports to and asks through.' }],
+        returns: 'the route\'s account facts after the token set was stored.',
+        throws: ['{LlmOAuthError} code `UNKNOWN_PROVIDER` when this implementation does not offer the route, `LOGIN_ABORTED` when the human cancelled, or `LOGIN_FAILED` when the flow itself failed.'],
+      },
+      {
+        signature: 'abstract logout(provider: string): Promise<void>',
+        description: 'Remove one route\'s stored token set. Signing out a route that is already signed out is a no-op; the provider-side session is untouched, because nothing here can end it.',
+        parameters: [{ name: 'provider', description: 'the provider route key.' }],
+        throws: ['{LlmOAuthError} code `UNKNOWN_PROVIDER` when this implementation does not offer the route.'],
+      },
+      {
+        signature: 'abstract tokens(): LlmOAuthTokenStore',
+        description: 'The durable token store, for the LLM adapter that authenticates requests. This is the seam\'s only path to a secret and exists because the rotation happens inside the provider SDK: the adapter hands the store over and the SDK refreshes under its lock.',
+        parameters: [],
+        returns: 'the store backing this implementation.',
+      },
+    ],
+  },
+  {
     key: 'lsp',
     summary: 'The LSP capability seam (`ctx.lsp`).',
     description: 'The LSP capability seam (`ctx.lsp`). Owns provider registration/selection and normalized query execution; exposes exactly the four operations and no protocol escape hatch.',
@@ -2388,6 +2433,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'payload', description: '.change - fresh current projection or clear tombstone.' }],
   },
   {
+    name: 'llm-oauth/updated',
+    mode: 'emit',
+    signature: '\'llm-oauth/updated\'(provider: string): void',
+    summary: 'Committed change to a stored subscription token set: a completed sign-in, a sign-out, or a rotation observed in storage.',
+    description: 'Committed change to a stored subscription token set: a completed sign-in, a sign-out, or a rotation observed in storage. Listener failures are contained and logged — a sync throw and an async rejection alike — without changing the committed operation\'s outcome, except `INVARIANT`-coded failures, which rethrow after every listener ran; that rethrow reaches the emitter only from synchronous listeners, so invariant checks on this event must not be async functions.',
+    parameters: [{ name: 'provider', description: 'the provider route whose stored token set changed.' }],
+  },
+  {
     name: 'llm/adapters-updated',
     mode: 'emit',
     signature: '\'llm/adapters-updated\'(): void',
@@ -2801,7 +2854,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CommandInputDescriptor',
-    declaration: 'export interface CommandInputDescriptor {\n    readonly hint: string;\n}',
+    declaration: 'export interface CommandInputDescriptor {\n    readonly hint: string;\n    readonly required?: boolean;\n}',
   },
   {
     name: 'CommandInvocation',
@@ -3306,6 +3359,42 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'LlmModelReasoningInfo',
     declaration: 'export interface LlmModelReasoningInfo {\n    efforts: readonly LlmReasoningEffortInfo[];\n    defaultEffort?: ReasoningEffortId;\n}',
+  },
+  {
+    name: 'LlmOAuthAccount',
+    declaration: 'export interface LlmOAuthAccount extends LlmOAuthProviderInfo {\n    signedIn: boolean;\n    expiresAt?: number;\n}',
+  },
+  {
+    name: 'LlmOAuthEvent',
+    declaration: 'export type LlmOAuthEvent = {\n    kind: \'auth-url\';\n    url: string;\n    instructions?: string;\n} | {\n    kind: \'device-code\';\n    userCode: string;\n    verificationUri: string;\n    intervalSeconds?: number;\n    expiresInSeconds?: number;\n} | {\n    kind: \'progress\';\n    message: string;\n} | {\n    kind: \'info\';\n    message: string;\n    links?: readonly LlmOAuthLink[];\n};',
+  },
+  {
+    name: 'LlmOAuthInteraction',
+    declaration: 'export interface LlmOAuthInteraction {\n    signal?: AbortSignal;\n    prompt(prompt: LlmOAuthPrompt): Promise<string>;\n    notify(event: LlmOAuthEvent): void;\n}',
+  },
+  {
+    name: 'LlmOAuthLink',
+    declaration: 'export interface LlmOAuthLink {\n    url: string;\n    label?: string;\n}',
+  },
+  {
+    name: 'LlmOAuthPrompt',
+    declaration: 'export type LlmOAuthPrompt = {\n    signal?: AbortSignal;\n} & ({\n    kind: \'text\';\n    message: string;\n    placeholder?: string;\n} | {\n    kind: \'secret\';\n    message: string;\n    placeholder?: string;\n} | {\n    kind: \'manual-code\';\n    message: string;\n    placeholder?: string;\n} | {\n    kind: \'select\';\n    message: string;\n    options: readonly LlmOAuthPromptOption[];\n});',
+  },
+  {
+    name: 'LlmOAuthPromptOption',
+    declaration: 'export interface LlmOAuthPromptOption {\n    id: string;\n    label: string;\n    description?: string;\n}',
+  },
+  {
+    name: 'LlmOAuthProviderInfo',
+    declaration: 'export interface LlmOAuthProviderInfo {\n    provider: string;\n    displayName: string;\n    loginLabel: string;\n}',
+  },
+  {
+    name: 'LlmOAuthToken',
+    declaration: 'export interface LlmOAuthToken {\n    access: string;\n    refresh: string;\n    expires: number;\n    extra?: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'LlmOAuthTokenStore',
+    declaration: 'export interface LlmOAuthTokenStore {\n    read(provider: string): Promise<LlmOAuthToken | undefined>;\n    list(): Promise<readonly string[]>;\n    modify(provider: string, fn: (current: LlmOAuthToken | undefined) => Promise<LlmOAuthToken | undefined>): Promise<LlmOAuthToken | undefined>;\n    delete(provider: string): Promise<void>;\n}',
   },
   {
     name: 'LlmProviderInfo',

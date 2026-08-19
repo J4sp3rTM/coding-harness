@@ -8,13 +8,15 @@
 
 ## 输入元数据
 
-该服务公开一个可选的非结构化输入提示。命令的可用性由插件组合决定：每个消费注册表的适配器都会看到全部生效定义。
+该服务公开一个可选的非结构化输入描述符。其 `required` 标志默认为 true；设为 false 后，支持此能力的适配器可以执行裸调用，同时保留参数占位符和输入路径。命令的可用性由插件组合决定：每个消费注册表的适配器都会看到全部生效定义。
 
 ```ts type-equiv
 /** Immutable metadata for a command's optional unstructured input. */
 interface CommandInputDescriptor {
   /** Placeholder shown before the user supplies free-form input. */
   readonly hint: string
+  /** Whether a capable UI must collect input before a bare invocation; defaults to true. */
+  readonly required?: boolean
 }
 ```
 
@@ -161,7 +163,7 @@ find(agent: Agent, name: string): CommandDefinition | undefined
 
 Types: [Agent](core.md)
 
-Source: [`packages/interaction/commands/src/index.ts:225`](../../packages/interaction/commands/src/index.ts)
+Source: [`packages/interaction/commands/src/index.ts:232`](../../packages/interaction/commands/src/index.ts)
 
 <a id="commands-events"></a>
 
@@ -183,5 +185,5 @@ A command was registered or unregistered. This is an unfiltered registry notific
 'commands/change'(): void
 ```
 
-Source: [`packages/interaction/commands/src/types.ts:72`](../../packages/interaction/commands/src/types.ts)
+Source: [`packages/interaction/commands/src/types.ts:74`](../../packages/interaction/commands/src/types.ts)
 <!-- END GENERATED cordis-surface -->

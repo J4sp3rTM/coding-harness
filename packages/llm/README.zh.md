@@ -11,7 +11,10 @@ LLM（大语言模型）seam 及其提供方适配器。`llm` 包同时承担 Se
 | [`llm-retry/`](llm-retry/README.md) | 提供方作用域的重试策略 | 监听 `agent/request-error` |
 | [`llm-deepseek/`](llm-deepseek/README.md) | 直接 DeepSeek 适配器 | 注册到 `ctx.llm` |
 | [`llm-pi-ai/`](llm-pi-ai/README.md) | 多提供方 pi-ai 适配器 | 注册到 `ctx.llm` |
+| [`llm-oauth/`](llm-oauth/README.md) | 订阅登录 seam | `ctx.llmOAuth` |
+| [`llm-oauth-local/`](llm-oauth-local/README.md) | 文件后端令牌存储与目录登录流程 | 注册 `ctx.llmOAuth` |
+| [`command-login/`](command-login/README.md) | 面向人的 `/login` 与 `/logout` | 注册命令 |
 
-适配器在 seam 上注册提供方路由；重试与 token 测量仍是独立消费方。子 README 负责路由、元数据、回放和提供方协议细节；[LLM 架构决策](../../.agents/notes/implemented/architecture/2026-06-13-twin-llm-adapters.md)说明设计原理。
+适配器在 seam 上注册提供方路由；重试与 token 测量仍是独立消费方。订阅登录是它们旁边自成一体的 seam，因为供应商订阅用适配器交给自身 SDK 的、会轮换的令牌认证，而不是用配置能够点名的某个值。子 README 负责路由、元数据、回放和提供方协议细节；[LLM 架构决策](../../.agents/notes/implemented/architecture/2026-06-13-twin-llm-adapters.md)说明设计原理。
 
 子系统参考——消息与内容块、模型请求、`StreamChunk` 协议、适配器约定（adapter contract）——见 [docs/subsystems/llm-streaming.md](../../docs/subsystems/llm-streaming.md)（token 计量：[token-meter.md](../../docs/subsystems/token-meter.md)）；另见[孪生适配器](../../.agents/notes/implemented/architecture/2026-06-13-twin-llm-adapters.md)、[回放 token 计量](../../.agents/notes/implemented/architecture/2026-07-15-replay-token-meter-service.md)与[按路由模型上下文](../../.agents/notes/implemented/architecture/2026-07-20-routed-model-context-and-compaction-policy.md) Agent Note。

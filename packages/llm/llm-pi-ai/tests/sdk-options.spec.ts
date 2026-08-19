@@ -26,7 +26,7 @@ function gatewayAdapter(): PiAiAdapter {
         models: [{ id: 'local-model', contextWindow: 8192, maxTokens: 1024 }],
       },
     }),
-    resolveApiKey: () => Promise.resolve('test-key'),
+    resolveAuth: () => Promise.resolve({ subscription: false, apiKey: 'test-key' }),
   })
 }
 

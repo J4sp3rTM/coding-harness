@@ -8,13 +8,15 @@ Source: [`packages/interaction/commands/src/index.ts`](../../packages/interactio
 
 ## Input metadata
 
-The service exposes one optional unstructured-input hint. Command availability follows plugin composition: every adapter consuming the registry sees every effective definition.
+The service exposes an optional unstructured-input descriptor. Its `required` flag defaults to true; false lets capable adapters execute a bare invocation while retaining the argument placeholder and input path. Command availability follows plugin composition: every adapter consuming the registry sees every effective definition.
 
 ```ts type-equiv
 /** Immutable metadata for a command's optional unstructured input. */
 interface CommandInputDescriptor {
   /** Placeholder shown before the user supplies free-form input. */
   readonly hint: string
+  /** Whether a capable UI must collect input before a bare invocation; defaults to true. */
+  readonly required?: boolean
 }
 ```
 
@@ -161,7 +163,7 @@ find(agent: Agent, name: string): CommandDefinition | undefined
 
 Types: [Agent](core.md)
 
-Source: [`packages/interaction/commands/src/index.ts:225`](../../packages/interaction/commands/src/index.ts)
+Source: [`packages/interaction/commands/src/index.ts:232`](../../packages/interaction/commands/src/index.ts)
 
 <a id="commands-events"></a>
 
@@ -183,5 +185,5 @@ A command was registered or unregistered. This is an unfiltered registry notific
 'commands/change'(): void
 ```
 
-Source: [`packages/interaction/commands/src/types.ts:72`](../../packages/interaction/commands/src/types.ts)
+Source: [`packages/interaction/commands/src/types.ts:74`](../../packages/interaction/commands/src/types.ts)
 <!-- END GENERATED cordis-surface -->

@@ -171,7 +171,14 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
     if (rawInput.hint.trim().length === 0) {
       throw new TypeError(`command "${definition.name}" input hint must not be empty`)
     }
-    input = Object.freeze({ hint: rawInput.hint })
+    const required: unknown = 'required' in rawInput ? rawInput.required : undefined
+    if (required !== undefined && typeof required !== 'boolean') {
+      throw new TypeError(`command "${definition.name}" input required must be a boolean when supplied`)
+    }
+    input = Object.freeze({
+      hint: rawInput.hint,
+      ...required === undefined ? {} : { required },
+    })
   }
   const normalized = Object.freeze({
     name: definition.name,

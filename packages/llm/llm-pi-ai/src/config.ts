@@ -21,7 +21,7 @@ import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
 import type { ResolvedRetryPolicy, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
-import { MODALITIES, resolveRouteModels, SUPPORTED_THINKING_FORMATS, THINKING_LEVELS } from './catalog.ts'
+import { catalogProviderTakesOAuth, MODALITIES, resolveRouteModels, SUPPORTED_THINKING_FORMATS, THINKING_LEVELS } from './catalog.ts'
 import type {
   PiAiCompatProfile,
   PiAiModality,
@@ -61,8 +61,28 @@ export type {
   PiAiThinkingFormat,
 } from './catalog.ts'
 
+/** How one provider route authenticates its requests. */
+export type PiAiAuthMode = 'api-key' | 'subscription'
+
+/** Every authentication mode a profile may name, most-reached first. */
+export const AUTH_MODES: readonly PiAiAuthMode[] = ['api-key', 'subscription']
+
 /** Configuration for one pi-ai provider route; the `providers` dict key IS the route. */
 export interface PiAiProviderProfile {
+  /**
+   * How this route authenticates.
+   *
+   * `subscription` requires a stored sign-in from `ctx.llmOAuth` and never
+   * falls back — the fallback would put the request on whatever API key the
+   * environment happens to carry, billing another account for work the user
+   * meant to put on their plan. `api-key` requires the key path and ignores a
+   * stored sign-in.
+   *
+   * Omission lets a stored sign-in own the route and otherwise takes the key
+   * path, which is what makes signing in enough to use a subscription and
+   * signing out enough to go back.
+   */
+  auth?: PiAiAuthMode
   /** Credential reference (environment-variable name) resolved per request through `ctx.credentials`. */
   apiKeyEnv?: string
   /** Name shown by configuration surfaces; defaults to the route key. */
@@ -230,6 +250,7 @@ const modelProfile: z<PiAiModelProfile> = z.object({
 const modelOverride: z<PiAiModelOverride> = z.object(modelFields)
 
 const profile = z.object({
+  auth: z.union(AUTH_MODES),
   apiKeyEnv: z.string().role('credential-ref'),
   displayName: z.string(),
   api: z.union(supportedProtocols()),
@@ -314,6 +335,17 @@ export function resolveProfiles(
     }
     if (source.displayName !== undefined && source.displayName.length === 0) {
       throw new Error(`llm-pi-ai: provider "${provider}" has an empty displayName`)
+    }
+    // A route the installed catalog cannot sign into can never satisfy
+    // `subscription`: pi-ai resolves an OAuth credential only through the
+    // provider's own OAuth method, and a route declaring none has nothing to
+    // resolve. Refusing it here names the settings key while it is being
+    // written, instead of failing every request the route later takes.
+    if (source.auth === 'subscription' && !catalogProviderTakesOAuth(provider)) {
+      throw new Error(
+        `llm-pi-ai: provider "${provider}" sets auth: subscription, but the installed catalog offers no`
+        + ' subscription sign-in for this route; use auth: api-key with an apiKeyEnv reference',
+      )
     }
     const streamIdleTimeoutMs = source.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS
     if (!Number.isFinite(streamIdleTimeoutMs)

@@ -10,11 +10,18 @@
 
 按提供方配置凭据、模型 catalog 与部署特定传输设置，并以提供方路由本身为键。`apiKeyEnv` 是按请求解析的凭据*引用*，因此机密不进入该文件。省略它会让该路由处于未认证状态；对已安装 catalog 路由而言，这意味着交给 pi-ai 的提供方原生环境发现。已配置却解析不出任何值的引用则相反，会让请求以 `MISSING_CREDENTIAL` 失败，因为放行下去就会用环境里恰好持有的某个无关密钥完成认证。一条凭据服务该路由下的全部模型。
 
+`auth` 在 key 路径与供应商订阅之间做选择。它是可选的，而默认值正是「登录即可」的由来：`auth` 未设时，在 [`ctx.llmOAuth`](../llm-oauth/README.md) 上持有已存登录的路由用订阅认证，没有的则走 key 路径——于是 `/login anthropic` 把该路由挪到 Claude Pro/Max 计划上，`/logout anthropic` 把它挪回来，两次都不改动 `settings.yaml`。点名模式即钉住它：`subscription` 在无人登录时以 `MISSING_SUBSCRIPTION` 拒绝请求，而不回落到 key；`api-key` 则忽略已存登录。只有已安装 catalog 为其附带 OAuth 方法的路由才可以写 `subscription`，其余的在写入处即被拒绝。
+
 ```yaml
 - id: llm
   name: '@deepseek-ai/dsh-llm-pi-ai'
   config:
     providers:
+      # Subscription route: the models come from pi-ai and the credential from
+      # a sign-in. Written out here only to pin the mode; with `auth` omitted,
+      # signing in is enough.
+      openai-codex:
+        auth: subscription
       # Catalog route: endpoint, protocol, and models all come from pi-ai.
       openai:
         apiKeyEnv: OPENAI_API_KEY
@@ -152,7 +159,9 @@ profile 的 `models` 列表是*替换*该路由已安装 catalog，而不是扩�
 
 ## 应用归因
 
-每个请求都携带 dsh-llm `attributionHeaders()` 的共享归因标头，并通过 pi-ai `headers` 流选项合并。不会合成提供方特定应用归因标头。详见 [dsh-llm § 应用归因](../llm/README.md#app-attribution-attributionts)。
+每个 api-key 请求都携带 dsh-llm `attributionHeaders()` 的共享归因标头，并通过 pi-ai `headers` 流选项合并。不会合成提供方特定应用归因标头。详见 [dsh-llm § 应用归因](../llm/README.md#app-attribution-attributionts)。
+
+订阅请求不携带。提供订阅的供应商，其 OAuth 路径会以普通请求头的形式发送自己的客户端身份——Anthropic 的那条会连同其端点要求的 `anthropic-beta` 开关一起发送 CLI user agent，并在同一端点要求下前置身份前置语。Harness 归因最后合并，会覆盖掉那个 user agent，于是每个这样的请求都会被拒。令牌本身已经向签发它的供应商标识了客户端，而那正是归因存在的意义，因此这里选择不发送，而不是让它与一个已被破坏的身份同行。这是唯一一条归因不随行的路径。
 
 ## 依赖体量
 
@@ -190,7 +199,7 @@ pi-ai 事件会变为 harness 推理、文本、工具调用、usage 与 finish 
 
 ## 已知限制与暂缓事项
 
-- **仅以 OAuth 认证的提供方不予提供**：pi-ai 的 OAuth 只从*已存储*的 OAuth 凭据解析，而本适配器构造 `Models` 集合时不注入凭据存储、也不运行登录流程，因此这类路由的每个请求都会在发出之前以 `Provider is not configured` 失败。可配置提供方目录因此不列出它们；已安装 catalog 中只有 `openai-codex` 属于此类。settings 文档已经写过的路由仍保留目录条目，配置界面据此可以编辑或删除；`apiKeyEnv` 也仍能用该密钥完成认证——对 Codex 而言那是一个会过期、且这里没有任何环节会去刷新的 token。
+- **订阅路由需要组合登录 seam**：pi-ai 的 OAuth 只从*已存储*的凭据解析，且没有任何环境发现路径，因此本适配器的集合经由 `ctx.llmOAuth` 读取。未组合登录服务的部署把每条路由都留在 key 路径上，而只有 OAuth 一种方法的路由（已安装 catalog 中即 `openai-codex`）在那里会以 `Provider is not configured` 失败。只有 catalog 为其附带 OAuth 方法的路由才谈得上登录：手工声明的网关没有流程，因此在它上面写 `auth: subscription` 会在写入处被拒绝。
 - **提供方自带的凭据发现只读进程环境**：不指定凭据的路由交由 catalog 提供方自行解析，而它探测的是环境变量（`AZURE_OPENAI_API_KEY`、`AWS_PROFILE`、`AWS_ACCESS_KEY_ID` 以及各提供方自己的那一组）。它不读任何本地凭据目录，因此只有 `~/.aws/credentials` 而未导出 `AWS_PROFILE` 会被解析为未配置；由 harness 凭据 seam 保管的值，除非进程环境里也有，否则对它不可见。
 - **settings 能新增或覆盖路由，但不能移除组合路由**：用户层合并在组合 `base` 之上，因此删除 `cordis.yml` 提供的提供方属于组合变更；对该 namespace 执行 `replace` 只会重置用户层。
 - **分层合并对字典键没有删除语义**：settings seam 把组合 `base` 与用户层按键递归合并，因此 base 声明的某个 `reasoningEfforts` 档位、`modelOverrides` 条目或 `compat` 字段，用户层只能覆盖、无法移除——而 `reasoningEfforts` 里缺席本身*就是*语义（「不提供」），于是 base 声明过的档位会一直被提供。只有 `cordis.yml` entry config 为用户层正在编辑的同一模型声明了按模型推理字段才会触发；受支持的姿态是把这些字段留给 settings 文档（shipped 组合以 dormant 方式挂载该适配器），且 `models` 列表是数组、整体替换，这是带内的解决办法。

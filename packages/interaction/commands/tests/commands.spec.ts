@@ -167,6 +167,25 @@ describe('CommandRuntime', () => {
       ...command('input-type'),
       input: null,
     } as unknown as CommandDefinition)).toThrow('command "input-type" input hint must be a string')
+    expect(() => ctx.commands.register({
+      ...command('required-type'),
+      input: { hint: 'value', required: 'sometimes' },
+    } as unknown as CommandDefinition)).toThrow('command "required-type" input required must be a boolean')
+  })
+
+  it('publishes whether advertised command input is required', async () => {
+    const ctx = await mount()
+    const { agent } = await mintAgentScope(ctx, 'a')
+    ctx.commands.register({
+      ...command('optional-input'),
+      input: { hint: 'value', required: false },
+    })
+
+    expect(ctx.commands.list(agent)).toContainEqual({
+      name: 'optional-input',
+      description: 'command optional-input',
+      input: { hint: 'value', required: false },
+    })
   })
 
   it('passes exact invocation context and detaches valid handler results', async () => {

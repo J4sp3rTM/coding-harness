@@ -730,6 +730,16 @@ describe('mapStopReason / mapUsage', () => {
     expect(mapStopReason(assistant({ stopReason, content: [{ type: 'text', text: 'ok' }] }))).toEqual(expected)
   })
 
+  it.each(['pending', 'deferred'] as const)('rejects unsupported terminal %s', (stopReason) => {
+    expect(mapStopReason(assistant({ stopReason }))).toEqual({
+      kind: 'error',
+      failure: {
+        message: `pi-ai returned unsupported terminal stop reason "${stopReason}"`,
+        code: 'PI_AI_ERROR',
+      },
+    })
+  })
+
   it('classifies a completed stop with no content as an EMPTY_RESPONSE error', () => {
     expect(mapStopReason(assistant({ stopReason: 'stop' }))).toEqual({
       kind: 'error',

@@ -261,7 +261,7 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     )
   }
 
-  /** Decision table, menu column: contribution/decorated-host → popup; host input → claim; host bare → detached execute. */
+  /** Decision table, menu column: popup, required input claim, or detached bare execute. */
   private dispatch(pick: InputTriggerPick): PickOutcome {
     const name = pick.candidate.name
     const contribution = this.live.contributions.get(name)
@@ -279,7 +279,9 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
       this.openPopup(name, decoration.ui, pick.session, { via: 'menu', span: pick.span })
       return 'handled'
     }
-    if (desc.input !== undefined) return { claim: this.leadingClaim(desc, pick.session) }
+    if (desc.input !== undefined && desc.input.required !== false) {
+      return { claim: this.leadingClaim(desc, pick.session) }
+    }
     // Menu-pick execute consumes the trigger span before the detached run
     // (scoped event; the input owns the CAS guard).
     this.consumeVia(pick.session.sessionId, { via: 'menu', span: pick.span })
@@ -329,7 +331,9 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
         return 'handled'
       }
     }
-    if (desc.input !== undefined) return { claim: this.leadingClaim(desc, session) }
+    if (desc.input !== undefined && (!bare || desc.input.required !== false)) {
+      return { claim: this.leadingClaim(desc, session) }
+    }
     if (!bare) return undefined
     this.consumeVia(session.sessionId, { via: 'enter', token })
     this.runDetached(desc, session, trimmed)

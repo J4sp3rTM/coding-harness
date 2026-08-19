@@ -2,9 +2,13 @@
 
 [English](llm-streaming.md) | 中文
 
-[`packages/llm`](../../packages/llm/README.md) 提供对话与流式输出类型：每个请求和持久历史共用的 `Message`/`ContentBlock` 变体、完整组装的模型请求、原始 `StreamChunk` 协议、每个适配器必须实现的适配器约定（adapter contract），以及共享的 assembler。[核心包](core.md)在每个轮次持有并记录这些值；本页声明它们。
+[`packages/llm`](../../packages/llm/README.md) 提供对话、流式输出与订阅认证类型：每个请求和持久历史共用的 `Message`/`ContentBlock` 变体、完整组装的模型请求、原始 `StreamChunk` 协议、每个适配器必须实现的适配器约定（adapter contract）、订阅登录服务，以及共享的 assembler。[核心包](core.md)在每个轮次持有并记录对话值；本页声明共享的 LLM 类型。
 
 源码：[`packages/llm/llm/src/types.ts`](../../packages/llm/llm/src/types.ts)
+
+## 订阅认证
+
+`ctx.llmOAuth` 通过 `LlmOAuthProviderInfo` 提供可登录路由，并只向状态界面暴露不含秘密的 `LlmOAuthAccount` 事实。登录流程通过 `LlmOAuthInteraction` 交互：事件报告授权 URL、设备代码、进度与信息，提示则请求流程所需的每一个值。`LlmOAuthTokenStore` 是供 LLM 适配器使用的独立 Host-only API；其串行化 `modify` 操作让提供方 SDK 能够轮换只能使用一次的刷新令牌，而不会把令牌暴露给状态或命令界面。[登录包](../../packages/llm/llm-oauth/README.md)负责完整的提供方与存储约定。
 
 <a id="content-blocks-and-messages"></a>
 
@@ -872,6 +876,66 @@ stream(options: GenerateOptions): AsyncIterable<StreamChunk>
 
 Source: [`packages/llm/llm/src/index.ts:284`](../../packages/llm/llm/src/index.ts)
 
+<a id="ctxllmoauth--llmoauthservice-abstract-seam"></a>
+
+### `ctx.llmOAuth` — `LlmOAuthService` (abstract seam)
+
+Abstract subscription sign-in service. Providers implement the flows over their own durable store; the store itself is published through LlmOAuthService.tokens so an LLM adapter can hand it to the SDK that rotates the token, without any other consumer being able to read a secret through the seam's own methods.
+
+```ts cordis-catalog
+/**
+ * The provider routes this implementation can sign into.
+ * @returns the offered routes, in the order sign-in surfaces should present them.
+ */
+abstract providers(): readonly LlmOAuthProviderInfo[]
+
+/**
+ * Sign-in state of every offered route.
+ * @returns one account per offered route, signed in or not.
+ */
+abstract accounts(): Promise<readonly LlmOAuthAccount[]>
+
+/**
+ * Sign-in state of one route.
+ * @param provider - the provider route key.
+ * @returns the route's account facts.
+ * @throws {LlmOAuthError} code `UNKNOWN_PROVIDER` when this implementation does not offer the route.
+ */
+abstract status(provider: string): Promise<LlmOAuthAccount>
+
+/**
+ * Run one route's sign-in flow and store the token set it returns. A
+ * successful sign-in replaces whatever was stored for the route.
+ * @param provider - the provider route key.
+ * @param interaction - the surface the flow reports to and asks through.
+ * @returns the route's account facts after the token set was stored.
+ * @throws {LlmOAuthError} code `UNKNOWN_PROVIDER` when this implementation
+ *   does not offer the route, `LOGIN_ABORTED` when the human cancelled, or
+ *   `LOGIN_FAILED` when the flow itself failed.
+ */
+abstract login(provider: string, interaction: LlmOAuthInteraction): Promise<LlmOAuthAccount>
+
+/**
+ * Remove one route's stored token set. Signing out a route that is already
+ * signed out is a no-op; the provider-side session is untouched, because
+ * nothing here can end it.
+ * @param provider - the provider route key.
+ * @throws {LlmOAuthError} code `UNKNOWN_PROVIDER` when this implementation does not offer the route.
+ */
+abstract logout(provider: string): Promise<void>
+
+/**
+ * The durable token store, for the LLM adapter that authenticates requests.
+ * This is the seam's only path to a secret and exists because the rotation
+ * happens inside the provider SDK: the adapter hands the store over and the
+ * SDK refreshes under its lock.
+ * @returns the store backing this implementation.
+ */
+abstract tokens(): LlmOAuthTokenStore
+```
+
+Source: [`packages/llm/llm-oauth/src/index.ts:126`](../../packages/llm/llm-oauth/src/index.ts)
+
 <a id="llm-events"></a>
 
 ### `llm/*` events
@@ -920,4 +984,31 @@ Waterfall around every streaming model call (retry, replay, routing). Bound to t
 ```
 
 Source: [`packages/llm/llm/src/index.ts:64`](../../packages/llm/llm/src/index.ts)
+
+<a id="llm-oauth-events"></a>
+
+### `llm-oauth/*` events
+
+<a id="llm-oauthupdated--emit"></a>
+
+#### `llm-oauth/updated` — emit
+
+Committed change to a stored subscription token set: a completed sign-in, a sign-out, or a rotation observed in storage. Listener failures are contained and logged — a sync throw and an async rejection alike — without changing the committed operation's outcome, except `INVARIANT`-coded failures, which rethrow after every listener ran; that rethrow reaches the emitter only from synchronous listeners, so invariant checks on this event must not be async functions.
+
+```ts cordis-catalog
+/**
+ * Committed change to a stored subscription token set: a completed sign-in,
+ * a sign-out, or a rotation observed in storage. Listener failures are
+ * contained and logged — a sync throw and an async rejection alike —
+ * without changing the committed operation's outcome, except
+ * `INVARIANT`-coded failures, which rethrow after every listener ran; that
+ * rethrow reaches the emitter only from synchronous listeners, so invariant
+ * checks on this event must not be async functions.
+ * @param provider - the provider route whose stored token set changed.
+ * @mode emit
+ */
+'llm-oauth/updated'(provider: string): void
+```
+
+Source: [`packages/llm/llm-oauth/src/types.ts:130`](../../packages/llm/llm-oauth/src/types.ts)
 <!-- END GENERATED cordis-surface -->

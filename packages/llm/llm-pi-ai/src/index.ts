@@ -59,17 +59,20 @@ import type { Context } from '@deepseek-ai/cordis'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { assertUsableApiKey, LlmError } from '@deepseek-ai/dsh-llm'
 import type { AdapterRegistrationHandle, DirectoryRegistrationHandle, LlmConfigurableProvider } from '@deepseek-ai/dsh-llm'
+import type { LlmOAuthTokenStore } from '@deepseek-ai/dsh-llm-oauth'
 import { deepEqualJson, installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { PiAiAdapter } from './adapter.ts'
-import { catalogProviderIds, catalogProviderTakesApiKey } from './catalog.ts'
+import type { PiAiRequestAuth } from './adapter.ts'
+import { catalogProviderIds, catalogProviderTakesApiKey, catalogProviderTakesOAuth } from './catalog.ts'
 import { assertServiceable, Config, resolveProfiles } from './config.ts'
-import type { ResolvedPiAiProviderProfile } from './config.ts'
+import type { PiAiProviderProfile, ResolvedPiAiProviderProfile } from './config.ts'
 import { discoverModels } from './discovery.ts'
 
 export { PiAiAdapter } from './adapter.ts'
-export type { PiAiAdapterOptions } from './adapter.ts'
+export type { PiAiAdapterOptions, PiAiRequestAuth } from './adapter.ts'
 export { Config } from './config.ts'
 export type {
+  PiAiAuthMode,
   PiAiCompatProfile,
   PiAiModality,
   PiAiModelOverride,
@@ -82,6 +85,11 @@ export type {
 export { supportedProtocols } from './provider.ts'
 
 export const name = 'llm-pi-ai'
+// The sign-in seam is deliberately absent here: an api-key-only deployment
+// composes none, and a route that needs one must fail its own request rather
+// than keep this adapter from mounting. It is read per request through
+// `ctx.get('llmOAuth')`, which also lets a sign-in service mounted after this
+// plugin reach the routes already registered.
 export const inject = ['llm']
 
 const NS = settingsNamespace('llm-pi-ai')
@@ -134,13 +142,15 @@ function directoryEntries(
       declared: !catalog.has(provider),
     })
   }
-  // A provider whose only native method is OAuth leaves this adapter nothing
-  // to authenticate with, so offering it would put a card on the settings page
-  // whose own posture — no key, credentials discovered by the provider — fails
-  // every request. Catalog *membership* is unaffected, so `declare` above still
-  // answers what pi-ai ships.
+  // A provider this adapter can authenticate by neither method leaves nothing
+  // to configure, so offering it would put a card on the settings page whose
+  // own posture — no key, credentials discovered by the provider — fails every
+  // request. A subscription route qualifies through the sign-in seam even
+  // though it takes no key, which is what puts `openai-codex` on the page.
+  // Catalog *membership* is unaffected, so `declare` above still answers what
+  // pi-ai ships.
   for (const provider of catalog) {
-    if (catalogProviderTakesApiKey(provider)) declare(provider, provider)
+    if (catalogProviderTakesApiKey(provider) || catalogProviderTakesOAuth(provider)) declare(provider, provider)
   }
   for (const [provider, profile] of profiles) declare(provider, profile.displayName)
   return [...entries.values()]
@@ -151,6 +161,19 @@ export function apply(ctx: Context, config: Config): void {
   let current: () => Config = () => config
   let lastRaw: Config | undefined
   let memoized: ReadonlyMap<string, ResolvedPiAiProviderProfile> | undefined
+  /**
+   * The routes a sign-in currently authenticates, as a synchronous view.
+   *
+   * Profile resolution is synchronous and runs on every operation, while the
+   * token store is asynchronous, so the set is refreshed on the seam's commit
+   * event rather than read per resolve. The version counter is what the
+   * profile memo keys on: a sign-in changes the route set without changing the
+   * settings document, and without it the memo would keep serving the route
+   * set from before.
+   */
+  let signedInRoutes: ReadonlySet<string> = new Set()
+  let signedInVersion = 0
+  let memoizedVersion = -1
   /**
    * The resolved profiles for the current configuration, memoized by the raw
    * snapshot's identity — which is also what makes the adapter's own snapshot
@@ -164,13 +187,48 @@ export function apply(ctx: Context, config: Config): void {
    */
   const profiles = (): ReadonlyMap<string, ResolvedPiAiProviderProfile> => {
     const raw = current()
-    if (raw === lastRaw && memoized !== undefined) return memoized
-    const next = resolveProfiles(raw.providers)
+    if (raw === lastRaw && signedInVersion === memoizedVersion && memoized !== undefined) return memoized
+    const next = resolveProfiles({ ...raw.providers, ...adoptedRoutes(raw) })
     lastRaw = raw
+    memoizedVersion = signedInVersion
     memoized = next
     return next
   }
-  profiles()
+
+  /**
+   * Catalog routes this deployment serves because they are signed in.
+   *
+   * Signing in is the whole configuration a subscription route needs: its
+   * endpoint, protocol, and model catalog all come from the installed catalog,
+   * and its credential comes from the sign-in. Requiring a settings profile on
+   * top would mean a user who completed a browser sign-in still saw no models
+   * until they went and wrote the route's name in a file, which is a
+   * configuration step with nothing left to configure.
+   *
+   * A route the settings document already names is left alone — the profile is
+   * the deployment's own answer for it, including a deliberate `auth: api-key`
+   * — and a route pi-ai cannot sign into is never adopted, so a stale token for
+   * a provider this build dropped disappears rather than failing every request.
+   * @param raw - the current configuration, whose routes are already served.
+   * @returns synthetic profiles for the signed-in routes nothing configures.
+   */
+  const adoptedRoutes = (raw: Config): Record<string, PiAiProviderProfile> => {
+    const configured = raw.providers ?? {}
+    const adopted: Record<string, PiAiProviderProfile> = {}
+    for (const provider of signedInRoutes) {
+      if (provider in configured) continue
+      if (!catalogProviderTakesOAuth(provider)) continue
+      adopted[provider] = { auth: 'subscription' }
+    }
+    return adopted
+  }
+
+  /** The subscription token store, when a sign-in service is composed and live. */
+  const resolveTokens = (): LlmOAuthTokenStore | undefined => ctx.get('llmOAuth')?.tokens()
+
+  /** Whether a route currently holds a stored subscription token set. */
+  const signedIn = async (provider: string): Promise<boolean> =>
+    await resolveTokens()?.read(provider) !== undefined
 
   const resolveApiKey = async (
     provider: string,
@@ -197,9 +255,38 @@ export function apply(ctx: Context, config: Config): void {
     )
   }
 
+  /**
+   * Decide how one route authenticates its next request.
+   *
+   * The three postures are decided here rather than inside the adapter because
+   * only this fiber can see the sign-in seam and the credential seam at once.
+   * A profile naming `subscription` never falls through to a key: the fallback
+   * would silently move the request onto whatever ambient key the environment
+   * carries, which is the one outcome a user putting work on their plan did not
+   * ask for. A profile naming nothing lets a stored sign-in own the route,
+   * which makes signing in sufficient and signing out reversible.
+   */
+  const resolveAuth = async (
+    provider: string,
+    profile: ResolvedPiAiProviderProfile,
+  ): Promise<PiAiRequestAuth> => {
+    if (profile.auth === 'subscription') {
+      if (await signedIn(provider)) return { subscription: true }
+      throw new LlmError(
+        `llm-pi-ai: provider route "${provider}" is configured for subscription sign-in, and nobody is signed`
+        + ` in — run "/login ${provider}", or set auth: api-key with an apiKeyEnv reference to use a key`,
+        'MISSING_SUBSCRIPTION',
+      )
+    }
+    if (profile.auth === undefined && await signedIn(provider)) return { subscription: true }
+    const apiKey = await resolveApiKey(provider, profile)
+    return { subscription: false, ...apiKey === undefined ? {} : { apiKey } }
+  }
+
   const adapter = new PiAiAdapter({
     profiles,
-    resolveApiKey,
+    resolveAuth,
+    resolveTokens,
     resolveAttachments: () => ctx.get('attachments'),
     onReplayDegrade: ({ provider, model, reason }) => {
       ctx.logger.warn(
@@ -280,6 +367,79 @@ export function apply(ctx: Context, config: Config): void {
     registeredFacts = facts
   }
   ensureRegistrationFacts()
+
+  /**
+   * Re-read which routes a sign-in authenticates and re-register when the set
+   * moved. Registration and the configurable-provider directory both capture
+   * the route set, so adopting or dropping a route has to reach them the same
+   * way a settings change does.
+   */
+  let reportedOnce = false
+  const refreshSignedIn = async (): Promise<void> => {
+    const tokens = resolveTokens()
+    const next = new Set(tokens === undefined ? [] : await tokens.list())
+    const changed = next.size !== signedInRoutes.size || [...next].some(route => !signedInRoutes.has(route))
+    if (changed) {
+      signedInRoutes = next
+      signedInVersion += 1
+      try {
+        ensureRegistrationFacts()
+        ensureDirectory()
+      } catch (error) {
+        ctx.logger.error('llm-pi-ai: keeping the previous routes after a refused subscription update')
+        ctx.logger.error(error)
+      }
+    }
+    // The startup report is the point of the first pass even when nothing
+    // moved: a tree with no routes at all is exactly the state users arrive
+    // asking about, and it changes nothing by definition.
+    if (!changed && reportedOnce) return
+    reportedOnce = true
+    reportRoutes()
+  }
+  // A sign-in or sign-out in THIS process; an external one (another harness
+  // process, a terminal sign-in) reaches a running tree on its next start.
+  ctx.on('llm-oauth/updated', () => { void refreshSignedIn() })
+
+  /**
+   * One line per provider route at startup and after every route change, plus
+   * the one diagnosis this adapter can make that a user cannot: a subscription
+   * that is signed in but serves no models. Written at info level because the
+   * absence of a provider is the question users actually arrive with, and it
+   * has no other visible symptom.
+   */
+  function reportRoutes(): void {
+    const resolved = profiles()
+    const signedInList = [...signedInRoutes].sort()
+    ctx.logger.info('llm-pi-ai: subscription sign-ins: %s',
+      signedInList.length === 0 ? '(none)' : signedInList.join(', '))
+    if (resolved.size === 0) {
+      ctx.logger.info('llm-pi-ai: no provider routes registered'
+        + ' — sign in with /login, or add a provider on the Models settings page')
+      return
+    }
+    for (const [provider, profile] of resolved) {
+      const auth = profile.auth ?? (signedInRoutes.has(provider) ? 'subscription (adopted)' : 'api-key')
+      const models = profile.piProvider.getModels().length
+      ctx.logger.info('llm-pi-ai: route %s — auth %s, %s model(s)', provider, auth, String(models))
+    }
+    for (const provider of signedInList) {
+      if (resolved.has(provider)) continue
+      ctx.logger.warn('llm-pi-ai: "%s" is signed in but serves no models here;'
+        + ' this build\'s catalog offers no subscription for that route', provider)
+    }
+  }
+
+  // The store is asynchronous and this fiber is not, so the first read lands
+  // after mount: the tree is already serving the configured routes, and an
+  // adopted one joins them a tick later.
+  ctx.effect(() => {
+    void refreshSignedIn().catch((error: unknown) => {
+      ctx.logger.error('llm-pi-ai: could not read the subscription token store')
+      ctx.logger.error(error)
+    })
+    return () => {}
+  }, 'llm-pi-ai: adopt signed-in routes')
 
   installSettingsSection(ctx, NS, Config, config, {
     // Refuse an unserviceable section where it is written: without this a

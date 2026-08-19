@@ -13,6 +13,8 @@ import type { CommandId } from './brand.ts'
 export interface CommandInputDescriptor {
   /** Placeholder shown before the user supplies free-form input. */
   readonly hint: string
+  /** Whether a capable UI must collect input before a bare invocation; defaults to true. */
+  readonly required?: boolean
 }
 
 /** Expected command outcome rendered directly by the dispatching UI. */

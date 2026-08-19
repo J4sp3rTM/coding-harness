@@ -189,6 +189,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Configuration carries references to secrets; providers own the values. Consumers resolve per operation, so a rotated credential reaches the very next request; the web gateway exposes value-free views and write-only storage.',
   },
   {
+    key: 'llmOAuth',
+    pkg: 'llm-oauth',
+    title: 'Provider subscription sign-in seam',
+    mode: 'seam',
+    implementations: ['llm-oauth-local'],
+    consumers: ['llm-pi-ai', 'command-login'],
+    note: 'Status surfaces receive non-secret account facts; the adapter alone receives the serialized token store that provider SDKs use for refresh rotation.',
+  },
+  {
     key: 'sessionTelemetry',
     pkg: 'session-telemetry',
     title: 'Session telemetry seam',

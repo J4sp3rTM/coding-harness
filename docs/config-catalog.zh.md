@@ -893,6 +893,29 @@ export interface DeepSeekCatalogModel {
 
 来源：[`packages/llm/llm-deepseek/src/index.ts:62`](../packages/llm/llm-deepseek/src/index.ts)
 
+<a id="deepseek-aidsh-llm-oauth-local"></a>
+
+## `@deepseek-ai/dsh-llm-oauth-local`
+
+```ts config-catalog
+/** Plugin config: where the token document lives and which routes are offered. */
+export interface Config {
+  /** Token document path; defaults to `.oauth.json` under the harness home. */
+  path?: string
+  /** Harness home used when `path` is omitted; defaults to `$DSH_HOME` or `~/.dsh`. */
+  dshHome?: string
+  /**
+   * Provider routes this instance offers. Omission offers every installed
+   * catalog route that declares an OAuth method. A named route the catalog
+   * cannot sign into fails at load rather than being skipped, because the
+   * deployment that named it would otherwise see the option quietly missing.
+   */
+  providers?: string[]
+}
+```
+
+来源：[`packages/llm/llm-oauth-local/src/index.ts:51`](../packages/llm/llm-oauth-local/src/index.ts)
+
 <a id="deepseek-aidsh-llm-pi-ai"></a>
 
 ## `@deepseek-ai/dsh-llm-pi-ai`
@@ -912,6 +935,20 @@ export interface Config {
 
 /** Configuration for one pi-ai provider route; the `providers` dict key IS the route. */
 export interface PiAiProviderProfile {
+  /**
+   * How this route authenticates.
+   *
+   * `subscription` requires a stored sign-in from `ctx.llmOAuth` and never
+   * falls back — the fallback would put the request on whatever API key the
+   * environment happens to carry, billing another account for work the user
+   * meant to put on their plan. `api-key` requires the key path and ignores a
+   * stored sign-in.
+   *
+   * Omission lets a stored sign-in own the route and otherwise takes the key
+   * path, which is what makes signing in enough to use a subscription and
+   * signing out enough to go back.
+   */
+  auth?: PiAiAuthMode
   /** Credential reference (environment-variable name) resolved per request through `ctx.credentials`. */
   apiKeyEnv?: string
   /** Name shown by configuration surfaces; defaults to the route key. */
@@ -988,6 +1025,9 @@ export interface PiAiProviderProfile {
   /** Provider-owned model-request retry policy; omission uses normal defaults. */
   retryPolicy?: RetryPolicyConfig
 }
+
+/** How one provider route authenticates its requests. */
+export type PiAiAuthMode = 'api-key' | 'subscription'
 
 /** One configured model entry: an id plus the catalog fields it overrides. */
 export interface PiAiModelProfile {
@@ -1073,15 +1113,16 @@ export type PiAiThinkingFormat = Exclude<PiThinkingFormat, WithheldThinkingForma
 type PiThinkingFormat = NonNullable<OpenAICompletionsCompat['thinkingFormat']>
 
 /**
- * pi-ai thinking formats a profile cannot name: both drive the request through
- * `chatTemplateKwargs`, which this configuration does not expose.
+ * pi-ai thinking formats a profile cannot name: they require accompanying
+ * `chatTemplateKwargs` or `chatTemplateArgs`, which this configuration does
+ * not expose.
  */
-type WithheldThinkingFormat = 'chat-template' | 'qwen-chat-template'
+type WithheldThinkingFormat = 'baseten' | 'chat-template' | 'qwen-chat-template'
 ```
 
 依赖：`Api`（`@earendil-works/pi-ai`）· `CacheRetention`（`@earendil-works/pi-ai`）· `Model`（`@earendil-works/pi-ai`）· `ModelThinkingLevel`（`@earendil-works/pi-ai`）· `OpenAICompletionsCompat`（`@earendil-works/pi-ai`）· [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets`（`@earendil-works/pi-ai`）· `Transport`（`@earendil-works/pi-ai`）
 
-来源：[`packages/llm/llm-pi-ai/src/config.ts:172`](../packages/llm/llm-pi-ai/src/config.ts)
+来源：[`packages/llm/llm-pi-ai/src/config.ts:192`](../packages/llm/llm-pi-ai/src/config.ts)
 
 <a id="deepseek-aidsh-llm-replay"></a>
 
@@ -3065,6 +3106,7 @@ export interface Config {
 - `@deepseek-ai/dsh-command-compact` — 需要 `commands` · `compact`（[`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts)）
 - `@deepseek-ai/dsh-command-feedback` — 需要 `commands`（[`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts)）
 - `@deepseek-ai/dsh-command-goal` — 需要 `commands` · `goals`（[`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts)）
+- `@deepseek-ai/dsh-command-login` — 需要 `commands` · `llmOAuth` · `userQuestions`（[`packages/llm/command-login/src/index.ts`](../packages/llm/command-login/src/index.ts)）
 - `@deepseek-ai/dsh-commands`（[`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts)）
 - `@deepseek-ai/dsh-cordis-client-runner`（[`packages/extensions/cordis-client-runner/src/index.ts`](../packages/extensions/cordis-client-runner/src/index.ts)）
 - `@deepseek-ai/dsh-fs-e2b` — 需要 `e2b`（[`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts)）
@@ -3104,6 +3146,7 @@ export interface Config {
 - `@deepseek-ai/dsh-fs` — 抽象 `FileSystem`（[`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts)）
 - `@deepseek-ai/dsh-host-directory-picker` — 抽象 `DirectoryPicker`（[`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts)）
 - `@deepseek-ai/dsh-jobs` — 抽象 `JobRegistry`（[`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts)）
+- `@deepseek-ai/dsh-llm-oauth` — 抽象 `LlmOAuthService`（[`packages/llm/llm-oauth/src/index.ts`](../packages/llm/llm-oauth/src/index.ts)）
 - `@deepseek-ai/dsh-sandbox` — 抽象 `SandboxProvider`（[`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts)）
 - `@deepseek-ai/dsh-session-persistence` — 抽象 `SessionPersistence`（[`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts)）
 - `@deepseek-ai/dsh-session-query` — 抽象 `SessionQueryEngine`（[`packages/session-query/session-query/src/index.ts`](../packages/session-query/session-query/src/index.ts)）

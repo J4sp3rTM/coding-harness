@@ -83,10 +83,11 @@ export const THINKING_LEVELS = Object.keys(THINKING_LEVEL_GATE) as readonly Mode
 type PiThinkingFormat = NonNullable<OpenAICompletionsCompat['thinkingFormat']>
 
 /**
- * pi-ai thinking formats a profile cannot name: both drive the request through
- * `chatTemplateKwargs`, which this configuration does not expose.
+ * pi-ai thinking formats a profile cannot name: they require accompanying
+ * `chatTemplateKwargs` or `chatTemplateArgs`, which this configuration does
+ * not expose.
  */
-type WithheldThinkingFormat = 'chat-template' | 'qwen-chat-template'
+type WithheldThinkingFormat = 'baseten' | 'chat-template' | 'qwen-chat-template'
 
 /** One reasoning-dispatch wire format a profile may name. */
 export type PiAiThinkingFormat = Exclude<PiThinkingFormat, WithheldThinkingFormat>
@@ -143,22 +144,34 @@ export function catalogProviderIds(): readonly string[] {
 
 /**
  * Whether the installed catalog provider for one route declares an api-key
- * method — the only authentication this adapter obtains on its own.
- *
- * A key is what the harness resolves through its own credential seam and hands
- * pi-ai per request. pi-ai's other method, OAuth, resolves from a *stored*
- * OAuth credential alone: `resolveProviderAuth` has no ambient path for it,
- * this adapter builds its `Models` collection with no credential store, and
- * nothing here runs a login flow. So a provider offering OAuth by itself
- * leaves nothing for this adapter to authenticate with, and the posture such a
- * provider invites — no key configured, credentials discovered by the provider
- * — fails every request with `Provider is not configured`.
+ * method — the authentication this adapter obtains on its own, per request,
+ * through the harness credential seam.
  * @param provider - provider route key.
  * @returns whether the catalog provider takes an api key; false for a route
  *   pi-ai does not ship, which the caller answers for separately.
  */
 export function catalogProviderTakesApiKey(provider: string): boolean {
   return catalogProvider(provider)?.auth.apiKey !== undefined
+}
+
+/**
+ * Whether the installed catalog provider for one route declares an OAuth
+ * method — the subscription sign-in the harness serves through
+ * `@deepseek-ai/dsh-llm-oauth`.
+ *
+ * pi-ai resolves OAuth from a *stored* credential alone: it has no ambient
+ * path for one, so such a route is serviceable exactly while the sign-in seam
+ * supplies a token store holding that route's tokens. A route offering OAuth
+ * and nothing else — `openai-codex` is the one the installed catalog ships —
+ * is therefore configurable only because of that seam; without it the posture
+ * such a provider invites fails every request with `Provider is not
+ * configured`.
+ * @param provider - provider route key.
+ * @returns whether the catalog provider takes a subscription sign-in; false
+ *   for a route pi-ai does not ship.
+ */
+export function catalogProviderTakesOAuth(provider: string): boolean {
+  return catalogProvider(provider)?.auth.oauth !== undefined
 }
 
 /**

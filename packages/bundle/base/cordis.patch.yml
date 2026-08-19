@@ -69,6 +69,16 @@
     - id: jobs
       name: '@deepseek-ai/dsh-jobs-local'
 
+    # Console log exporter. Without one, every `ctx.logger` call in the tree is
+    # discarded, which makes a misconfiguration look like silence rather than a
+    # diagnostic. `DSH_LOG_LEVEL` follows cordis's own scale: 0 error, 1 +info
+    # (the default), 2 +warn, 3 +debug.
+    - id: logger-console
+      name: '@deepseek-ai/cordis-plugin-logger-console'
+      config:
+        levels:
+          default: !!js Number(process.env.DSH_LOG_LEVEL ?? 1)
+
     - id: llm-retry
       name: '@deepseek-ai/dsh-llm-retry'
 
@@ -94,6 +104,15 @@
     # document.
     - id: llm-pi-ai
       name: '@deepseek-ai/dsh-llm-pi-ai'
+
+    # Provider subscriptions (Claude Pro/Max, ChatGPT Plus/Pro, and every other
+    # sign-in the installed pi-ai catalog ships). Tokens live in
+    # `$DSH_HOME/.oauth.json`, owner-only, and rotate under the store's own
+    # lock; a signed-in route authenticates with the subscription instead of an
+    # API key, and signing out puts it back on the key path. `/login` is the
+    # user-facing half.
+    - id: llm-oauth
+      name: '@deepseek-ai/dsh-llm-oauth-local'
 
     - id: session-persistence-jsonl
       name: '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -288,6 +307,12 @@
     # independent, so it follows whichever compaction service this leaf mounts.
     - id: command-compact
       name: '@deepseek-ai/dsh-command-compact'
+
+    # Human `/login` and `/logout` over the sign-in seam. The flow's browser
+    # step and its paste-the-redirect fallback both travel through
+    # `user-questions`, so any UI that can already ask a question can sign in.
+    - id: command-login
+      name: '@deepseek-ai/dsh-command-login'
 
     - id: subagent
       name: '@deepseek-ai/dsh-subagent'

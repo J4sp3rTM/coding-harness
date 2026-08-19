@@ -27,6 +27,12 @@ const S1_CMDS: CommandDescriptor[] = [
   { name: 'goal', description: 'leadingInput kind', input: { hint: 'goal text' } },
 ]
 
+const OPTIONAL_INPUT: CommandDescriptor = {
+  name: 'login',
+  description: 'optional leadingInput kind',
+  input: { hint: 'provider', required: false },
+}
+
 const S2_CMDS: CommandDescriptor[] = [
   ...S1_CMDS,
   { name: 'attach', description: 'scoped shadow', input: { hint: 'path' } },
@@ -392,6 +398,19 @@ describe('dispatch (menu column)', () => {
     })
   })
 
+  it('host optional input executes bare from the menu', async () => {
+    const { source, mint, warm, executeCalls } = await bench({
+      commands: () => Promise.resolve({ commands: [...S1_CMDS, OPTIONAL_INPUT] }),
+    })
+    mint('s1')
+    await warm(proj('s1'))
+
+    expect(menuPick(source, 'login', proj('s1'))).toBe('handled')
+    await vi.waitFor(() => {
+      expect(executeCalls).toEqual([{ sessionId: sid('s1'), line: '/login' }])
+    })
+  })
+
   it('a name the directory no longer serves → undefined (snapshot swapped between menu and pick)', async () => {
     const { source, warm } = await bench()
     await warm(proj('s1'))
@@ -462,6 +481,22 @@ describe('matchEnter (enter column)', () => {
       if (outcome === undefined || outcome === 'handled' || !('claim' in outcome)) throw new Error('expected claim')
       expect(outcome.claim.token).toBe('/goal ')
     }
+  })
+
+  it('optional input executes bare and claims an argued invocation', async () => {
+    const { source, mint, warm, executeCalls } = await bench({
+      commands: () => Promise.resolve({ commands: [...S1_CMDS, OPTIONAL_INPUT] }),
+    })
+    mint('s1')
+    await warm(proj('s1'))
+
+    await expect(source.matchEnter!(proj('s1'), '/login', signal())).resolves.toBe('handled')
+    const argued = await source.matchEnter!(proj('s1'), '/login xai', signal())
+    if (argued === undefined || argued === 'handled' || !('claim' in argued)) throw new Error('expected claim')
+    expect(argued.claim.token).toBe('/login ')
+    await vi.waitFor(() => {
+      expect(executeCalls).toEqual([{ sessionId: sid('s1'), line: '/login' }])
+    })
   })
 
   it('bare host command executes detached with the bare-token consume guard', async () => {
