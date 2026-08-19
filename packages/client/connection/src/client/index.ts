@@ -108,7 +108,16 @@ export function apply(ctx: Context): void {
   }
   const handle: ConnectionHandle = {
     api,
-    isLoopback: pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    // "Is the Host this user's own machine?" — the question host-local
+    // capabilities are gated on (durable settings, editing the settings
+    // document, opening a produced file). An http page answers it with a
+    // loopback authority; the desktop page answers it with its scheme, which
+    // is the stronger proof: the app is served from a scheme only this
+    // process registers, so there is no socket to have come in over. Its
+    // `app` authority is not a loopback hostname, so without this the shell
+    // would be judged a remote browser and every setting would fall back to
+    // process-local memory.
+    isLoopback: pageLocation === undefined || desktop || isLoopbackHostname(pageLocation.hostname),
     hostDescription: {
       getSnapshot: () => description,
       subscribe: (listener) => {
