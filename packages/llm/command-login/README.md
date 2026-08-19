@@ -14,7 +14,7 @@ Sign-in is a conversation, not a form: the flow hands out an authorization URL o
 
 Flow events are carried into the question that needs them. An authorization URL appears as the supporting text of the provider's next prompt. A device code appears immediately in an acknowledgement question while the provider keeps polling; completing the flow dismisses the question, and choosing Cancel aborts the flow. Browser-launch failures do not fail sign-in because the same URL and code remain visible.
 
-A successful `/login` says which route is now on the subscription and how to reverse it. `/logout` says the stored token is gone from this machine and that the authorization itself is revoked on the provider's own account page.
+A successful `/login` says which route is now on the subscription and how to reverse it. In the Web dashboard, every text-bearing `/login` outcome also appears as a transient frame-wide toast in the browser that submitted it, including before the session has any chat history. `/logout` says the stored token is gone from this machine and that the authorization itself is revoked on the provider's own account page.
 
 Expected failures are reported as command errors rather than raised: a route the deployment does not offer (naming the ones it does), a cancelled sign-in, and a flow that did not complete. A deployment composing no sign-in service says so instead of offering an empty chooser.
 

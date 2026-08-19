@@ -25,6 +25,7 @@ The pipeline was ready but command knowledge had no landing spot: host-side `ctx
 - The three command kinds derive from the registration surfaces; developers never declare positions: a host descriptor with `input` = **leadingInput** (backfill `/name ␣` + claim, keep typing arguments, leading position only); a client-registered popupSelect spec = **popupSelect** (the official select-box shell, business ships zero components); neither = **execute** (run on selection, zero UI).
 - The dispatch decision table: the menu can trigger all three kinds; Space recognizes only leadingInput (the misfire defense: irreversible side effects keep explicit entry points only); Enter runs execute / opens the shell only on a bare token, while leadingInput tolerates trailing arguments.
 - The popup from `popupFor(actx)`: search filters locally, select is single-flight, the projection is captured at open, onSelect consumes the token through the consume-token event only on success, a failure is retained for retry, and a session switch merely hides it. The popup shell is a transient layer (never in the state machine): the box holds focus, Enter/↑↓/Escape belong to it, and clicking outside the box dismisses (clicking the textarea also returns focus).
+- A matched result emits the browser-local `command/executed` event. A text-bearing `/login` result renders a transient toast through the frame-owned `shell.overlay`, covering blank sessions where Chat intentionally has no command rows; the durable command node remains the transcript replay and multi-client presentation.
 
 ### Reference sources (seeing only projections plus their own apply closures, on the root ctx)
 
@@ -38,7 +39,7 @@ The pipeline was ready but command knowledge had no landing spot: host-side `ctx
 
 ### Assembly-level acceptance: the slash-flow snapshot
 
-`apps/web/tests/slash-flow.snapshot.ts` pins the user-visible main chain (assembled keyless; package mocks are no substitute for the assembled transcript): the composer disabled with no session → creating a Workspace and entering an already-materialized blank session → picking the `/echo` leadingInput from the `/` menu → the command executes but the blank bit does not flip and the list still shows `New Session` → the first ordinary prompt's successful acceptance converts that same row; the same session-bound textarea holds across blank → active. `workspace-flow.snapshot.ts` separately pins blank-row creation/reuse, first-prompt rejection backfill, and — on a Workspace switch before the first prompt — the draft moving across input machines with the old blank row hidden.
+`apps/web/tests/slash-flow.snapshot.ts` pins the user-visible main chain (assembled keyless; package mocks are no substitute for the assembled transcript): the composer disabled with no session → creating a Workspace and entering an already-materialized blank session → picking the `/echo` leadingInput from the `/` menu → the command executes but the blank bit does not flip and the list still shows `New Session` → the first ordinary prompt's successful acceptance converts that same row; the same session-bound textarea holds across blank → active. `blank-command-outcome.e2e.ts` pins the frame-wide acknowledgement while the session remains blank. `workspace-flow.snapshot.ts` separately pins blank-row creation/reuse, first-prompt rejection backfill, and — on a Workspace switch before the first prompt — the draft moving across input machines with the old blank row hidden.
 
 ## Alternatives considered
 
@@ -50,7 +51,7 @@ The pipeline was ready but command knowledge had no landing spot: host-side `ctx
 | A new ContentBlock reference type | Full-chain cost (adapters/UI/compaction); text-as-truth plus structured occurrence records suffices |
 | Client packages self-reporting command directories | The host is the single source of truth; the client only reads descriptors, with `commands-changed` pushing invalidation |
 | The `requires: 'none' \| 'agent'` discriminant axis (an agentless directory + dual-addressed queries) | With sessions always agent-backed, the amphibious command has no owner; the whole axis is dropped, to be reopened on real demand |
-| Dedicated commandresult / commandpanel slots | Results go through notices; the popup shell is a skeleton-internal overlay; rich result cards sit in the ledger |
+| Dedicated commandresult / commandpanel slots | Login feedback uses the shared frame overlay plus durable command nodes; the popup shell is a skeleton-internal overlay; rich result cards sit in the ledger |
 | An agent-type directory as the `@` source | No type registry exists; the live-session snapshot already covers it |
 | A PickAction/EnterCommand class family (class-inheritance pick products) | Cross-package runtime values break client bundle purity; pure data interfaces plus closure methods are equivalent |
 
@@ -59,4 +60,5 @@ The pipeline was ready but command knowledge had no landing spot: host-side `ctx
 - Shipping a business command = a host registration plus one client `command.register` (popupSelect) or zero registration (execute/leadingInput derive automatically), with zero skeleton changes; the cost is that the three-kind semantics concentrate in ui-commands, and a hypothetical fourth kind means changing it.
 - The resident directory cache plus push invalidation buys zero-latency menus and reliable enter adjudication; the cost is three invalidation paths (the change frame, reconnect, the epoch guard) that all need tests pinning them.
 - sessionId addressing puts the host's per-agent effective directory (global + scoped shadows) straight on the wire, with the client presenting it as-is.
+- A submitting browser sees immediate login feedback even before the first chat turn; the same result can later appear as a durable command row when the transcript becomes active.
 - Known gaps: the popupSelect shell has no shipped business consumer yet (model selection and its kin arrive with the host `selectModel` work in live-mutation shape, serving as the onboarding template then); the queue's second cut (per-item Inbox operations), rich result cards, and roster configurability sit in the ledger awaiting their triggers.

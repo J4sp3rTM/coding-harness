@@ -1,20 +1,19 @@
 diff --git a/dist/auth/oauth/oauth-page.js b/dist/auth/oauth/oauth-page.js
-index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..8e9c1e4192229e90873ddacc76bf0b9eb68a165f 100644
+index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..d81cde3324ccc01e8ef1c1c14ab45fb5a67beb5f 100644
 --- a/dist/auth/oauth/oauth-page.js
 +++ b/dist/auth/oauth/oauth-page.js
 @@ -1,4 +1,5 @@
 -const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" aria-hidden="true"><path fill="#fff" fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/><path fill="#fff" d="M517.36 400 H634.72 V634.72 H517.36 Z"/></svg>`;
-+const SUCCESS_ICON = `<svg viewBox="0 0 48 48" role="img" aria-label="Success"><path d="m14.5 24.5 6 6 13-14" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-+const ERROR_ICON = `<svg viewBox="0 0 48 48" role="img" aria-label="Error"><path d="M24 14v13" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/><circle cx="24" cy="34" r="2" fill="currentColor"/></svg>`;
++const SUCCESS_ICON = `<svg viewBox="0 0 24 24" role="img" aria-label="Success"><path d="m5 12.5 4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
++const ERROR_ICON = `<svg viewBox="0 0 24 24" role="img" aria-label="Error"><path d="M12 7v6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.15" fill="currentColor"/></svg>`;
  function escapeHtml(value) {
      return value
          .replaceAll("&", "&amp;")
-@@ -12,94 +13,282 @@ function renderPage(options) {
+@@ -12,94 +13,170 @@ function renderPage(options) {
      const heading = escapeHtml(options.heading);
      const message = escapeHtml(options.message);
      const details = options.details ? escapeHtml(options.details) : undefined;
 +    const success = options.state === "success";
-+    const status = success ? "Connection secured" : "Connection interrupted";
 +    const icon = success ? SUCCESS_ICON : ERROR_ICON;
      return `<!doctype html>
  <html lang="en">
@@ -22,27 +21,57 @@ index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..8e9c1e4192229e90873ddacc76bf0b9e
    <meta charset="utf-8" />
    <meta name="viewport" content="width=device-width, initial-scale=1" />
 -  <title>${title}</title>
-+  <meta name="color-scheme" content="dark light" />
++  <meta name="color-scheme" content="light dark" />
 +  <title>${title} · DeepSeek Harness</title>
    <style>
++    /* Palette mirrors the harness design tokens (ui-theme design-platform.css):
++       neutral-bluish for surface and type, deepseek-500/400 as the accent,
++       red-500/400 for the failure state. */
      :root {
 -      --text: #fafafa;
 -      --text-dim: #a1a1aa;
 -      --page-bg: #09090b;
 -      --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 -      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-+      color-scheme: dark;
-+      --page: #070912;
-+      --panel: rgba(15, 20, 34, .78);
-+      --panel-edge: rgba(255, 255, 255, .1);
-+      --text: #f6f8ff;
-+      --muted: #9ca6bd;
-+      --success: #71e6b3;
-+      --error: #ff8e9b;
-+      --state: var(--success);
-+      --state-rgb: 113, 230, 179;
-+      --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
++      color-scheme: light dark;
++      --page: rgb(249, 250, 251);
++      --surface: rgb(255, 255, 255);
++      --edge: rgba(0, 0, 0, .1);
++      --text: rgb(15, 17, 21);
++      --muted: rgb(97, 102, 107);
++      --brand: rgb(53, 54, 56);
++      --accent: rgb(65, 118, 230);
++      --accent-soft: rgba(65, 118, 230, .1);
++      --accent-edge: rgba(65, 118, 230, .28);
++      --glow: rgba(97, 135, 216, .16);
++      --shadow: 0 18px 44px rgba(23, 43, 84, .1), 0 1px 2px rgba(16, 24, 40, .05);
++      --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
++      --mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
++    }
++    body[data-state="error"] {
++      --accent: rgb(239, 68, 68);
++      --accent-soft: rgba(239, 68, 68, .1);
++      --accent-edge: rgba(239, 68, 68, .28);
++    }
++    @media (prefers-color-scheme: dark) {
++      :root {
++        --page: rgb(27, 27, 28);
++        --surface: rgb(44, 44, 46);
++        --edge: rgba(255, 255, 255, .12);
++        --text: rgb(249, 250, 251);
++        --muted: rgb(207, 211, 214);
++        --brand: rgb(207, 211, 214);
++        --accent: rgb(103, 158, 254);
++        --accent-soft: rgba(103, 158, 254, .14);
++        --accent-edge: rgba(103, 158, 254, .32);
++        --glow: rgba(97, 135, 216, .18);
++        --shadow: 0 24px 60px rgba(0, 0, 0, .5);
++      }
++      body[data-state="error"] {
++        --accent: rgb(242, 90, 90);
++        --accent-soft: rgba(242, 90, 90, .14);
++        --accent-edge: rgba(242, 90, 90, .32);
++      }
      }
      * { box-sizing: border-box; }
 -    html { color-scheme: dark; }
@@ -57,82 +86,37 @@ index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..8e9c1e4192229e90873ddacc76bf0b9e
 -      background: var(--page-bg);
 +      display: grid;
 +      place-items: center;
-+      overflow-x: hidden;
-+      overflow-y: auto;
 +      padding: 28px;
 +      background:
-+        radial-gradient(circle at 18% 14%, rgba(57, 100, 254, .22), transparent 31rem),
-+        radial-gradient(circle at 86% 84%, rgba(103, 158, 254, .13), transparent 28rem),
++        radial-gradient(60rem 30rem at 50% -8%, var(--glow), transparent 70%),
 +        var(--page);
        color: var(--text);
 -      font-family: var(--font-sans);
 -      text-align: center;
 +      font-family: var(--font);
 +      -webkit-font-smoothing: antialiased;
-+    }
-+    body[data-state="error"] {
-+      --state: var(--error);
-+      --state-rgb: 255, 142, 155;
-+    }
-+    body::before {
-+      content: "";
-+      position: fixed;
-+      inset: 0;
-+      pointer-events: none;
-+      opacity: .22;
-+      background-image:
-+        linear-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px),
-+        linear-gradient(90deg, rgba(255, 255, 255, .035) 1px, transparent 1px);
-+      background-size: 46px 46px;
-+      mask-image: radial-gradient(circle at center, #000, transparent 72%);
-+    }
-+    .orb {
-+      position: fixed;
-+      width: 34rem;
-+      aspect-ratio: 1;
-+      border-radius: 50%;
-+      background: rgba(var(--state-rgb), .08);
-+      filter: blur(90px);
-+      pointer-events: none;
-+      animation: breathe 7s ease-in-out infinite;
      }
      main {
 -      width: 100%;
 -      max-width: 560px;
-+      position: relative;
-+      width: min(100%, 660px);
-+      isolation: isolate;
-+    }
-+    .brand {
-       display: flex;
+-      display: flex;
 -      flex-direction: column;
-       align-items: center;
-       justify-content: center;
-+      gap: 10px;
-+      margin-bottom: 18px;
-+      color: rgba(246, 248, 255, .82);
-+      font-size: 13px;
-+      font-weight: 650;
-+      letter-spacing: .02em;
+-      align-items: center;
+-      justify-content: center;
++      width: min(100%, 440px);
++      text-align: center;
      }
 -    .logo {
 -      width: 72px;
 -      height: 72px;
 -      display: block;
 -      margin-bottom: 24px;
-+    .brand-mark {
-+      display: grid;
-+      place-items: center;
-+      width: 28px;
-+      height: 28px;
-+      border: 1px solid rgba(255, 255, 255, .14);
-+      border-radius: 9px;
-+      background: linear-gradient(145deg, rgba(103, 158, 254, .3), rgba(57, 100, 254, .08));
-+      box-shadow: inset 0 1px rgba(255, 255, 255, .14);
-+      color: #dce7ff;
-+      font-size: 10px;
-+      font-weight: 800;
-+      letter-spacing: -.05em;
++    .brand {
++      margin-bottom: 22px;
++      color: var(--brand);
++      font-size: 13px;
++      font-weight: 600;
++      letter-spacing: .01em;
      }
 -    h1 {
 -      margin: 0 0 10px;
@@ -141,98 +125,53 @@ index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..8e9c1e4192229e90873ddacc76bf0b9e
 -      font-weight: 650;
 -      color: var(--text);
 +    .card {
-+      position: relative;
-+      overflow: hidden;
-+      padding: clamp(36px, 8vw, 68px) clamp(24px, 8vw, 72px) 34px;
-+      border: 1px solid var(--panel-edge);
-+      border-radius: 28px;
-+      background: linear-gradient(155deg, rgba(23, 31, 51, .88), var(--panel));
-+      box-shadow:
-+        0 28px 90px rgba(0, 0, 0, .46),
-+        inset 0 1px rgba(255, 255, 255, .07);
-+      text-align: center;
-+      backdrop-filter: blur(24px);
-+    }
-+    .card::before {
-+      content: "";
-+      position: absolute;
-+      inset: 0 14% auto;
-+      height: 1px;
-+      background: linear-gradient(90deg, transparent, rgba(var(--state-rgb), .75), transparent);
-+    }
-+    .status-icon {
-+      position: relative;
-+      display: grid;
-+      place-items: center;
-+      width: 86px;
-+      height: 86px;
-+      margin: 0 auto 28px;
-+      border: 1px solid rgba(var(--state-rgb), .42);
-+      border-radius: 28px;
-+      background: linear-gradient(145deg, rgba(var(--state-rgb), .2), rgba(var(--state-rgb), .06));
-+      box-shadow:
-+        0 0 0 9px rgba(var(--state-rgb), .045),
-+        0 18px 50px rgba(var(--state-rgb), .13),
-+        inset 0 1px rgba(255, 255, 255, .13);
-+      color: var(--state);
-+      transform: rotate(-3deg);
-+      animation: arrive .55s cubic-bezier(.2, .8, .2, 1) both;
++      padding: 40px 32px 34px;
++      border: 1px solid var(--edge);
++      border-radius: 20px;
++      background: var(--surface);
++      box-shadow: var(--shadow);
      }
 -    p {
-+    .status-icon svg {
-+      width: 48px;
-+      height: 48px;
-+      transform: rotate(3deg);
++    .mark {
++      display: grid;
++      place-items: center;
++      width: 52px;
++      height: 52px;
++      margin: 0 auto 22px;
++      border: 1px solid var(--accent-edge);
++      border-radius: 15px;
++      background: var(--accent-soft);
++      color: var(--accent);
++      animation: rise .42s cubic-bezier(.2, .75, .3, 1) both;
 +    }
-+    .eyebrow {
-+      display: inline-flex;
-+      align-items: center;
-+      gap: 8px;
-+      margin-bottom: 15px;
-+      color: var(--state);
-+      font-size: 12px;
-+      font-weight: 750;
-+      letter-spacing: .09em;
-+      text-transform: uppercase;
-+    }
-+    .eyebrow::before {
-+      content: "";
-+      width: 7px;
-+      height: 7px;
-+      border-radius: 50%;
-+      background: currentColor;
-+      box-shadow: 0 0 14px currentColor;
-+    }
++    .mark svg { width: 26px; height: 26px; }
 +    h1 {
        margin: 0;
 -      line-height: 1.7;
 -      color: var(--text-dim);
--      font-size: 15px;
-+      font-size: clamp(32px, 7vw, 48px);
-+      line-height: 1.05;
-+      font-weight: 690;
-+      letter-spacing: -.045em;
-+      text-wrap: balance;
++      font-size: 25px;
++      line-height: 1.2;
++      font-weight: 600;
++      letter-spacing: -.01em;
 +    }
 +    .message {
-+      max-width: 470px;
-+      margin: 18px auto 0;
++      margin: 11px auto 0;
++      max-width: 34ch;
 +      color: var(--muted);
-+      font-size: 16px;
-+      line-height: 1.65;
-+      text-wrap: balance;
+       font-size: 15px;
++      line-height: 1.6;
      }
      .details {
 -      margin-top: 16px;
 -      font-family: var(--font-mono);
 -      font-size: 13px;
 -      color: var(--text-dim);
-+      margin-top: 22px;
-+      padding: 14px 16px;
-+      border: 1px solid rgba(var(--state-rgb), .18);
-+      border-radius: 13px;
-+      background: rgba(3, 5, 11, .45);
-+      color: #c8cede;
++      margin-top: 20px;
++      padding: 12px 14px;
++      border: 1px solid var(--edge);
++      border-radius: 11px;
++      background: var(--accent-soft);
++      color: var(--muted);
 +      font-family: var(--mono);
 +      font-size: 12px;
 +      line-height: 1.55;
@@ -240,77 +179,28 @@ index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..8e9c1e4192229e90873ddacc76bf0b9e
        white-space: pre-wrap;
        word-break: break-word;
      }
-+    .handoff {
-+      display: flex;
-+      align-items: center;
-+      justify-content: center;
-+      gap: 9px;
-+      margin-top: 34px;
-+      padding-top: 25px;
-+      border-top: 1px solid rgba(255, 255, 255, .075);
-+      color: #7f899f;
-+      font-size: 12px;
-+    }
-+    .handoff svg { width: 15px; height: 15px; }
-+    @keyframes arrive {
-+      from { opacity: 0; transform: translateY(12px) rotate(-8deg) scale(.88); }
-+      to { opacity: 1; transform: translateY(0) rotate(-3deg) scale(1); }
-+    }
-+    @keyframes breathe {
-+      50% { transform: scale(1.12); opacity: .72; }
-+    }
-+    @media (prefers-color-scheme: light) {
-+      :root {
-+        color-scheme: light;
-+        --page: #f3f6fc;
-+        --panel: rgba(255, 255, 255, .82);
-+        --panel-edge: rgba(28, 43, 78, .1);
-+        --text: #11192b;
-+        --muted: #66708a;
-+      }
-+      body {
-+        background:
-+          radial-gradient(circle at 18% 14%, rgba(57, 100, 254, .16), transparent 31rem),
-+          radial-gradient(circle at 86% 84%, rgba(103, 158, 254, .12), transparent 28rem),
-+          var(--page);
-+      }
-+      body::before { opacity: .16; }
-+      .brand { color: #34405a; }
-+      .brand-mark { color: #244ab9; border-color: rgba(57, 100, 254, .18); }
-+      .card { box-shadow: 0 28px 90px rgba(57, 75, 115, .16), inset 0 1px #fff; }
-+      .message { color: var(--muted); }
-+      .details { background: rgba(238, 242, 251, .75); color: #4f5870; }
-+      .handoff { color: #7b8498; border-top-color: rgba(28, 43, 78, .08); }
-+    }
-+    @media (max-width: 520px) {
-+      body { padding: 18px; }
-+      .card { border-radius: 22px; }
-+      .status-icon { width: 76px; height: 76px; border-radius: 24px; }
++    @keyframes rise {
++      from { opacity: 0; transform: translateY(6px) scale(.96); }
++      to { opacity: 1; transform: none; }
 +    }
 +    @media (prefers-reduced-motion: reduce) {
-+      *, *::before, *::after { animation: none !important; }
++      .mark { animation: none; }
 +    }
    </style>
  </head>
 -<body>
 +<body data-state="${options.state}">
-+  <div class="orb" aria-hidden="true"></div>
    <main>
 -    <div class="logo">${LOGO_SVG}</div>
 -    <h1>${heading}</h1>
 -    <p>${message}</p>
 -    ${details ? `<div class="details">${details}</div>` : ""}
-+    <div class="brand"><span class="brand-mark">DSH</span><span>DeepSeek Harness</span></div>
++    <div class="brand">DeepSeek Harness</div>
 +    <section class="card" aria-labelledby="auth-heading">
-+      <div class="status-icon">${icon}</div>
-+      <div class="eyebrow">${status}</div>
++      <div class="mark">${icon}</div>
 +      <h1 id="auth-heading">${heading}</h1>
 +      <p class="message">${message}</p>
 +      ${details ? `<div class="details">${details}</div>` : ""}
-+      <div class="handoff">
-+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-+        <span>You can close this window and return to DeepSeek Harness.</span>
-+      </div>
 +    </section>
    </main>
  </body>

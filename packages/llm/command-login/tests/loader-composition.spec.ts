@@ -101,7 +101,7 @@ describe('/login real Loader composition through cordis.yml', () => {
 
     expect(execution?.result).toEqual({
       kind: 'success',
-      text: 'Signed in to xai (xAI (Grok)). Requests on this route now use the subscription; /logout xai reverses it.',
+      text: 'Signed in to xAI (Grok).',
     })
     expect(asked[0]?.questions[0]?.detail).toContain('ABCD-EFGH')
     expect(owner.session.events.map(event => event.type)).toEqual(['command/run', 'command/done'])

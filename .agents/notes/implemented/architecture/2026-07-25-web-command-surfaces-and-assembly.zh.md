@@ -25,6 +25,7 @@ Status: implemented
 - 命令三型按注册面派生，开发者不声明位置：host descriptor 带 `input` = **leadingInput**（回填 `/name ␣` + claim，继续打参数，仅限行首）；client 注册 popupSelect spec = **popupSelect**（官方选择框壳，业务零组件）；两者皆无 = **execute**（选中即执行，零 UI）。
 - 派发决策表：菜单可触发三型；Space 只认 leadingInput（误触发防线：不可逆副作用只留显式入口）；Enter 裸 token 才 execute/开壳、leadingInput 容忍尾随参数。
 - `popupFor(actx)` 的 popup：search 本地过滤、select single-flight、open 时捕获投影、onSelect 成功才经 consume-token 事件消 token、失败保留可重试、会话切换只隐藏。popup 壳是瞬态层（不进状态机）：框持焦点、Enter/↑↓/Escape 归它、点框外即 dismiss（点 textarea 同时归还焦点）。
+- 匹配结果会发布浏览器本地 `command/executed` 事件。带文本的 `/login` 结果通过 frame 自有的 `shell.overlay` 渲染瞬态 toast，覆盖 Chat 有意不显示命令行的空白会话；持久命令节点仍负责文本记录回放与多客户端呈现。
 
 ### 引用源（只见投影 + 自家 apply 闭包的 root ctx）
 
@@ -38,7 +39,7 @@ Status: implemented
 
 ### 装配级验收：slash-flow 快照
 
-`apps/web/tests/slash-flow.snapshot.ts` 钉住用户可见主链（assembled keyless，包 mock 不替代装配后的 transcript（文本记录））：无会话时 composer 禁用 → 创建 Workspace 并进入已实体化的 blank 会话 → `/` 菜单选 `/echo` leadingInput → 命令执行但 blank 位不翻转、列表仍显示 `New Session` → 首条普通提示词成功受理后同一行转正；同一个会话绑定的 textarea 在 blank → active 转换期间保持不变。`workspace-flow.snapshot.ts` 另钉住 blank 行创建/复用、首条提示词遭拒后的回填，以及在发出首条提示词前切换 Workspace 时 draft 跨 input machine 搬运且旧 blank 行隐藏。
+`apps/web/tests/slash-flow.snapshot.ts` 钉住用户可见主链（assembled keyless，包 mock 不替代装配后的 transcript（文本记录））：无会话时 composer 禁用 → 创建 Workspace 并进入已实体化的 blank 会话 → `/` 菜单选 `/echo` leadingInput → 命令执行但 blank 位不翻转、列表仍显示 `New Session` → 首条普通提示词成功受理后同一行转正；同一个会话绑定的 textarea 在 blank → active 转换期间保持不变。`blank-command-outcome.e2e.ts` 钉住会话仍为空时的全局确认。`workspace-flow.snapshot.ts` 另钉住 blank 行创建/复用、首条提示词遭拒后的回填，以及在发出首条提示词前切换 Workspace 时 draft 跨 input machine 搬运且旧 blank 行隐藏。
 
 ## 曾考虑的替代方案
 
@@ -50,7 +51,7 @@ Status: implemented
 | 新 ContentBlock 引用类型 | 全链路成本（适配器/UI/压缩（compaction））；文本即真身 + 结构化 occurrence 记录已足够 |
 | client 各包自报命令目录 | host 是唯一真源；client 只读 descriptor，`commands-changed` 推失效 |
 | `requires: 'none' \| 'agent'` 判别轴（agentless 目录 + 双址查询） | 会话恒 agent-backed 后两栖命令无 owner；整轴弃置，待真需求重开 |
-| 专用 commandresult / commandpanel slot | 结果走 notice；popup 壳是骨架内浮层；富结果卡入台账 |
+| 专用 commandresult / commandpanel slot | 登录反馈使用共享 frame overlay 与持久命令节点；popup 壳是骨架内浮层；富结果卡入台账 |
 | agent-type 目录做 `@` 源 | 无类型注册表；实时会话快照已覆盖 |
 | PickAction/EnterCommand 类族（类继承 pick 产物） | 跨包运行时值破坏 client bundle 纯度；纯数据接口 + 闭包方法等价 |
 
@@ -59,4 +60,5 @@ Status: implemented
 - 业务命令上架 = host 注册 + client 一笔 `command.register`（popupSelect）或零注册（execute/leadingInput 自动派生），零骨架改动；代价是三型语义集中在 ui-commands，假想的第四型意味着改它。
 - 常驻目录缓存 + 推失效换来菜单零延迟与回车裁决可靠；代价是三条失效路径（change 帧、重连、epoch guard）都需测试钉住。
 - sessionId 寻址让 host 的 per-agent 有效目录（全局 + scoped shadows）直接上 wire，client 原样呈现。
+- 提交命令的浏览器在首次 chat turn 前也能立即看到登录反馈；文本记录激活后，同一结果还会显示为持久命令行。
 - 已知欠账：popupSelect 壳暂无已上架业务消费方（模型选择等将随 host `selectModel` 工作以 live-mutation 形态到来，届时作接入样板）；队列第二刀（逐项 Inbox 操作）、富结果卡、roster 可配置性入台账待触发。

@@ -275,8 +275,7 @@ async function executeLogin(ctx: Context, invocation: CommandInvocation): Promis
     )
     return {
       kind: 'success',
-      text: `Signed in to ${account.provider} (${account.loginLabel}).`
-        + ` Requests on this route now use the subscription; /logout ${account.provider} reverses it.`,
+      text: `Signed in to ${account.loginLabel}.`,
     }
   } catch (error: unknown) {
     if (invocation.signal.aborted || surface.cancelled()) return { kind: 'error', text: 'Sign-in cancelled.' }
@@ -301,10 +300,12 @@ async function executeLogout(ctx: Context, invocation: CommandInvocation): Promi
   }
   try {
     await ctx.llmOAuth.logout(typed)
+    // Name the route the way `/login` named it: the human read a display
+    // name going in, so they should read the same one coming out.
+    const known = ctx.llmOAuth.providers().find(info => info.provider === typed)
     return {
       kind: 'success',
-      text: `Signed out of ${typed}. The stored token is gone from this machine;`
-        + ' the authorization itself is revoked on the provider\'s own account page.',
+      text: `Signed out of ${known?.displayName ?? typed}.`,
     }
   } catch (error: unknown) {
     const expected = expectedFailure(error)

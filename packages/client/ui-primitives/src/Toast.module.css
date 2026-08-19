@@ -1,8 +1,10 @@
-/* Transient top-center banner (DeepSeek Chat toast look): contrast fill,
-   inverted label, slide-in, then hold-and-fade. The fade delay/duration MUST
-   agree with HOLD_MS/FADE_MS in Toast.tsx: the component unmounts at their
-   sum, so a mismatched sheet either cuts the fade or leaves an invisible
-   banner blocking nothing. */
+/* Transient top-center banner: an elevated surface in the harness's own card
+   language (same fill/border/shadow as the question card and menus), so the
+   announcement reads as native chrome rather than an inverted notification
+   slab. Slide-in, then hold-and-fade. The fade delay/duration MUST agree with
+   HOLD_MS/FADE_MS in Toast.tsx: the component unmounts at their sum, so a
+   mismatched sheet either cuts the fade or leaves an invisible banner
+   blocking nothing. */
 
 .toast {
   position: fixed;
@@ -17,14 +19,16 @@
   pointer-events: none;
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: min(560px, calc(100vw - 48px));
-  padding: 12px 16px;
-  border-radius: 14px;
-  background: var(--dsw-alias-button-contrast-fill);
-  color: var(--dsw-alias-label-primary-inverted);
+  gap: 8px;
+  max-width: min(520px, calc(100vw - 48px));
+  padding: 11px 18px;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 12px;
+  background: var(--dsw-specific-input-major);
+  color: var(--dsw-alias-label-primary);
   font-size: 14px;
   line-height: 22px;
+  font-weight: 500;
   box-shadow: var(--dsw-shadow-lv3);
   transform: translateX(-50%);
   animation:

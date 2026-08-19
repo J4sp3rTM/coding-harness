@@ -78,7 +78,7 @@ describe('/login', () => {
     const { ctx, asked, run } = await boot()
     const result = await run('/login')
     expect(result).toMatchObject({ kind: 'success' })
-    expect(result?.text).toContain('Signed in to anthropic')
+    expect(result?.text).toBe('Signed in to Anthropic (Claude Pro/Max).')
     expect(await ctx.llmOAuth.status('anthropic')).toMatchObject({ signedIn: true })
     // One question: the flow's own paste prompt, not a route chooser.
     expect(asked).toHaveLength(1)

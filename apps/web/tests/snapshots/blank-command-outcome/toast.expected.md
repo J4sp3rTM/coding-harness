@@ -1,0 +1,1 @@
+- alert: "llm-oauth-local: provider \"unavailable-e2e-route\" is not offered for subscription sign-in; this deployment offers anthropic, github-copilot, kimi-coding, openai-codex, openrouter, radius, xai"
