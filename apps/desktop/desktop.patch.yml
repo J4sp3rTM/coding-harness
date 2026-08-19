@@ -1,0 +1,25 @@
+# The desktop overlay: the shipped web tree, carried in process.
+#
+# Applied as a `--patch` layer over the `web` profile, so every row the web
+# surface composes — api gateway, client plugin roster, runtime, conversation
+# UI — mounts exactly as it does for `dsh web`. Only the transport row differs.
+
+# The node:http carrier binds a socket. The desktop shell has a window instead
+# of a URL, so the socket is replaced rather than reconfigured: the Electron
+# carrier provides the same `webServer` service (same route table, same index
+# taps) over the app's custom scheme.
+- id: webserver
+  disabled: true
+
+- insert:
+    - id: electron-carrier
+      name: '@deepseek-ai/dsh-host-electron-carrier'
+
+# The web runtime still owns dist resolution, the fallback seat, and the
+# surface prompt section — all of which the desktop wants. What it must not do
+# is print a URL line for a server that no longer exists.
+- id: web-runtime
+  config:
+    printUrl: false
+    surfaceContext: true
+    trustedHosts: []

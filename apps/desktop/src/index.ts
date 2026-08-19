@@ -1,0 +1,140 @@
+/**
+ * Desktop application entry: the harness Host and its UI in ONE process.
+ *
+ * `dsh web` is two halves joined by a socket — a Host listening on loopback and
+ * a browser fetching it. The desktop shell removes the socket instead of
+ * wrapping it: the same composed Host boots inside Electron's main process, and
+ * the renderer reaches it through a custom scheme whose protocol handler is the
+ * route table itself. No port is bound, so nothing on the machine (or the LAN)
+ * can reach this Host but the window it belongs to.
+ *
+ * The composition is the shipped web tree with one row swapped — the node:http
+ * carrier for the Electron one (see desktop.patch.yml). Every other row, from
+ * the api gateway to the client plugin roster, mounts unchanged.
+ *
+ * @module @deepseek-ai/dsh-desktop
+ */
+
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+import { app, BrowserWindow, protocol, shell } from 'electron'
+import { loadLayeredEnv } from '@deepseek-ai/dsh-app-boot'
+import { toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
+import { runProfile } from '@deepseek-ai/dsh/profile-boot'
+import type { Context } from '@deepseek-ai/cordis'
+// Type-only: pulls the carrier's `webServer` Context declaration into this
+// program. The row itself is composed by desktop.patch.yml, not imported here.
+import type {} from '@deepseek-ai/dsh-host-electron-carrier'
+
+/** The scheme the app is served from; mirrors the client's DESKTOP_SCHEME. */
+const SCHEME = 'dsh'
+/** Authority of the app origin — `dsh://app/...`. */
+const ORIGIN = `${SCHEME}://app`
+/** Event-stream paths the base client reads as SSE rather than upgrading. */
+const EVENT_PATHS = ['/api/events.mux', '/api/events.host']
+
+const here = dirname(fileURLToPath(import.meta.url))
+
+/**
+ * Declare the app scheme before Electron starts.
+ *
+ * `standard` makes it a hierarchical origin (so relative URLs, module imports,
+ * and `location.origin` behave like http), `secure` clears the mixed-content
+ * and secure-context gates the client needs, and `stream` is what lets a
+ * handler answer with an open body — the SSE downlink depends on it.
+ */
+protocol.registerSchemesAsPrivileged([{
+  scheme: SCHEME,
+  privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: false },
+}])
+
+/**
+ * Boot the composed Host inside this process.
+ * @returns the settled root context.
+ */
+async function bootHost(): Promise<Context> {
+  const { ctx } = await runProfile({
+    environment: loadLayeredEnv('dsh'),
+    profile: 'web',
+    patchFiles: [join(here, '..', 'desktop.patch.yml')],
+    args: [],
+  })
+  return ctx
+}
+
+/**
+ * Route one renderer request into the in-process carrier.
+ *
+ * Two paths are answered ahead of the table: the event downlinks. The web
+ * transport's own route refuses them with 426 because a browser is expected to
+ * upgrade to a WebSocket there — a custom scheme cannot, so the desktop client
+ * reads them as SSE, which the gateway's fetch handler already serves.
+ * @param ctx - the booted root context.
+ * @param request - the renderer's request.
+ * @returns the response.
+ */
+async function route(ctx: Context, request: Request): Promise<Response> {
+  const url = new URL(request.url)
+  if (request.method === 'GET' && EVENT_PATHS.includes(url.pathname)) {
+    // Same origin rule the carrier applies; restated here because this branch
+    // answers ahead of it.
+    const origin = request.headers.get('origin')
+    if (origin !== null && origin !== ORIGIN) return new Response('forbidden', { status: 403 })
+    const apiProxy = ctx.get('apiProxy')
+    if (apiProxy === undefined) return new Response('not ready', { status: 503 })
+    return toFetchHandler(apiProxy).fetch(request)
+  }
+  return ctx.webServer.handle(request)
+}
+
+/** Open the application window on the booted Host. */
+function openWindow(): void {
+  const window = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 720,
+    minHeight: 480,
+    show: false,
+    backgroundColor: '#1b1b1c',
+    autoHideMenuBar: true,
+    webPreferences: {
+      // The renderer is the shipped web client and needs no Node: it talks to
+      // the Host over the scheme, exactly as the browser build talks over HTTP.
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+  window.once('ready-to-show', () => { window.show() })
+  // Anything the app points outward (provider sign-in, docs) belongs in the
+  // user's real browser, not in an app window with no address bar.
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  void window.loadURL(`${ORIGIN}/index.html`)
+}
+
+/**
+ * Bring the shell up: Electron first, then the Host, then the scheme that
+ * joins them — the window is opened last so it never races a route table that
+ * cannot answer it yet.
+ *
+ * Deliberately not top-level await: the bundled host closure carries CommonJS
+ * requires, and a module holding both cannot be classified.
+ */
+async function main(): Promise<void> {
+  await app.whenReady()
+  const ctx = await bootHost()
+  protocol.handle(SCHEME, request => route(ctx, request))
+  openWindow()
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) openWindow()
+  })
+}
+
+app.on('window-all-closed', () => { app.quit() })
+
+main().catch((error: unknown) => {
+  console.error('[dsh-desktop] failed to start:', error)
+  app.exit(1)
+})

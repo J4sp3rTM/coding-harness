@@ -12,3 +12,13 @@ export const MUX_EVENTS_PATH = `${API_PATH}/events.mux`
 
 /** Browser host-frame WebSocket pathname. */
 export const HOST_EVENTS_PATH = `${API_PATH}/events.host`
+
+/**
+ * URL scheme the desktop shell serves the app from, as `location.protocol`
+ * reports it (trailing colon included). Shared so the shell that registers the
+ * scheme and the client that recognizes it cannot drift.
+ */
+export const DESKTOP_SCHEME = 'dsh:'
+
+/** The same scheme without the colon, as Electron's protocol API takes it. */
+export const DESKTOP_SCHEME_NAME = 'dsh'
