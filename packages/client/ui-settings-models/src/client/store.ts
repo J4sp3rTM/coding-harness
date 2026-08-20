@@ -143,8 +143,14 @@ export class ModelsSettingsStore {
     const namespaces = new Map(views.map(view => [view.ns, view]))
     const rows: ProviderRow[] = providers.map((entry) => {
       const namespace = namespaces.get(entry.settingsNs)
-      const configured = namespace !== undefined
-        && (entry.settingsPath.length === 0 || getPath(namespace.value, entry.settingsPath) !== undefined)
+      // An active adapter route is already usable even when OAuth adopted it
+      // without writing a profile into the settings document. Keep requiring
+      // its namespace so a route with no editor surface remains addable/hidden.
+      const configured = namespace !== undefined && (
+        entry.active
+        || entry.settingsPath.length === 0
+        || getPath(namespace.value, entry.settingsPath) !== undefined
+      )
       const removable = namespace !== undefined
         && entry.settingsPath.length > 0
         && hasPath(namespace.user, entry.settingsPath)

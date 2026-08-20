@@ -16,18 +16,33 @@ import type { Win32DialogWorkerData } from './win32-dialog-worker.ts'
  * entry next to this module under plain node; unbuilt (source) consumers
  * bootstrap tsx first, mirroring the dsh CLI's source launch. The dialog is
  * the child's first window, so Windows activates it without a foreground
- * call.
+ * call. Electron hosts set `ELECTRON_RUN_AS_NODE` so `process.execPath` is
+ * still a Node IPC child rather than a second GUI instance.
  * @param data - the child payload (dialog title).
  * @returns the spawned child process.
  */
 export function spawnDialogWorker(data: Win32DialogWorkerData): ReturnType<typeof spawn> {
-  const env = { ...process.env, DSH_DIALOG_TITLE: data.title }
-  const stdio: StdioOptions = ['ignore', 'inherit', 'inherit', 'ipc']
+  const env = dialogWorkerEnv(data.title)
+  const stdio: StdioOptions = ['ignore', 'inherit', 'pipe', 'ipc']
   /* v8 ignore next 3 -- the built-output arm: tests always run unbuilt (src/) */
   if (!import.meta.url.endsWith('.ts')) {
     return spawn(process.execPath, [fileURLToPath(new URL('./worker.cjs', import.meta.url))], { env, stdio, windowsHide: true })
   }
   return spawn(process.execPath, ['--import', import.meta.resolve('tsx/esm'), fileURLToPath(new URL('./win32-dialog-worker.ts', import.meta.url))], { env, stdio, windowsHide: true })
+}
+
+/**
+ * Environment inherited by the dialog child. Electron's executable starts a
+ * second GUI process unless it receives `ELECTRON_RUN_AS_NODE`.
+ * @param title - dialog title forwarded as `DSH_DIALOG_TITLE`.
+ * @returns the child environment.
+ */
+export function dialogWorkerEnv(title: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, DSH_DIALOG_TITLE: title }
+  if (process.versions.electron !== undefined || /(?:^|[\\/])electron(?:\.exe)?$/i.test(process.execPath)) {
+    env.ELECTRON_RUN_AS_NODE = '1'
+  }
+  return env
 }
 
 export { closeThreadWindows } from './win32-dialog-bindings.ts'

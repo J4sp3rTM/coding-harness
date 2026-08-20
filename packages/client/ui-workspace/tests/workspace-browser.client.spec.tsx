@@ -172,6 +172,8 @@ describe('WorkspaceBrowser', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '单列表' }))
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '手动排序' }))
     await waitFor(() => {
       expect(b.store.getSnapshot().sessionOrderByAccount[FLAT_SESSION_ORDER_KEY])
         .toEqual(['one', 'two', 'three'])
@@ -312,6 +314,38 @@ describe('WorkspaceBrowser', () => {
     })
     expect(restored.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['two', 'one'])
     expect(screen.getAllByRole('treeitem').slice(1)[0]?.textContent).toContain('two')
+  })
+
+  it('puts newly observed sessions first in both grouped and flat accounts', async () => {
+    const initial = sessionState([summary('one', 3), summary('two', 2)])
+    const b = mount({
+      useSessions: hook(initial),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['one', 'two'])])),
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '单列表' }))
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '手动排序' }))
+    await waitFor(() => {
+      expect(b.store.getSnapshot().sessionOrderByAccount[FLAT_SESSION_ORDER_KEY]).toEqual(['one', 'two'])
+    })
+
+    const updated = sessionState([summary('one', 3), summary('two', 2), summary('new-high', 8), summary('new-low', 4)])
+    rerender(b, {
+      useSessions: hook(updated),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['one', 'two', 'new-high', 'new-low'])])),
+    })
+    await waitFor(() => {
+      expect(b.store.getSnapshot().sessionOrderByAccount[FLAT_SESSION_ORDER_KEY])
+        .toEqual(['new-high', 'new-low', 'one', 'two'])
+    })
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '按工作区' }))
+    await waitFor(() => {
+      expect(b.store.getSnapshot().sessionOrderByAccount.alpha)
+        .toEqual(['new-high', 'new-low', 'one', 'two'])
+    })
   })
 
   it('archives a session from the row menu and hides archived rows in both modes', async () => {

@@ -48,6 +48,7 @@ describe('pickWin32Directory', () => {
     first.worker.post({ kind: 'showing', threadId: 7 })
     first.worker.post({ kind: 'done', path: 'C:\\picked' })
     await expect(picked).resolves.toBe('C:\\picked')
+    expect(first.worker.kill).toHaveBeenCalledOnce()
     expect(first.close).not.toHaveBeenCalled()
 
     const second = harness()

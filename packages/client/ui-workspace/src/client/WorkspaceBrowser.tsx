@@ -115,13 +115,21 @@ function nextSessionOrderAccount({
   sortByRecency: boolean
 }): { order: SessionId[]; updatedAt: Record<string, number>; changed: boolean } {
   let order = reconciledSessionOrder(sessionIds, previousOrder)
+  // A saved account order is the order of the sessions known at that point.
+  // Newly created sessions must lead that order in either view mode; manual
+  // sorting still controls the relative order of existing sessions.
+  const newlyObserved = previousOrder === undefined
+    ? []
+    : sessionIds.filter(id => !previousOrder.includes(id))
+  const newIds = [...newlyObserved].sort((a, b) => compareSessionRecency(a, b, list.byId))
   if (sortByRecency) {
     order.sort((a, b) => compareSessionRecency(a, b, list.byId))
   } else if (orderBy === 'updated') {
+    const newSet = new Set(newIds)
     const promoted = sessionIds
       .filter((id) => {
         const session = list.byId[id]
-        return session !== undefined
+        return !newSet.has(id) && session !== undefined
           && (previousUpdatedAt[id] === undefined || session.updatedAt > previousUpdatedAt[id])
       })
       .sort((a, b) => compareSessionRecency(a, b, list.byId))
@@ -129,6 +137,10 @@ function nextSessionOrderAccount({
       const promotedIds = new Set(promoted)
       order = [...promoted, ...order.filter(id => !promotedIds.has(id))]
     }
+  }
+  if (newIds.length > 0) {
+    const newSet = new Set(newIds)
+    order = [...newIds, ...order.filter(id => !newSet.has(id))]
   }
   const updatedAt: Record<string, number> = {}
   for (const id of sessionIds) {

@@ -226,6 +226,22 @@ async function mountDeepSeekCard(overrides: Parameters<typeof scriptedFace>[0] =
 }
 
 describe('ModelsSection', () => {
+  it('renders an active OAuth-only provider as an editable usable row without a key badge', async () => {
+    const scripted = scriptedFace()
+    scripted.face.settings.describe.mockResolvedValue(ok({
+      writable: true,
+      hasDocument: false,
+      namespaces: wireNamespaces().map(namespace => namespace.ns === 'llm-pi-ai'
+        ? { ...namespace, value: { providers: {} }, user: { providers: {} }, base: { providers: {} } }
+        : namespace),
+    }))
+    await mountFace(scripted)
+    const row = screen.getByText('openai').closest('li')
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLElement).getByRole('button', { name: openaiCopy(en.editProvider) })).toBeTruthy()
+    expect(within(row as HTMLElement).queryByRole('img')).toBeNull()
+  })
+
   it('renders nothing before the slot injects its dependencies', () => {
     const uninjected = {} as ModelsSectionProps
     render(<ModelsSection {...uninjected} />)

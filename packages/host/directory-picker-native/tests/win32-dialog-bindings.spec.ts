@@ -127,14 +127,9 @@ function installFakeKoffi(world: ComWorld): void {
       proto: (declaration: string) => ({ declaration }),
       pointer: (type: unknown) => type,
       sizeof: (type: string) => { void type; return FAKE_POINTER_SIZE },
-      view: (value: unknown, len: number): ArrayBuffer => {
-        const bytes = Buffer.alloc(len)
-        bytes.write((value as FakePtr).text as string, 'utf16le')
-        return bytes.buffer
-      },
       register: (fn: (hwnd: unknown, lparam: unknown) => number) => { world.registered += 1; return { fn } },
       unregister: () => { world.unregistered += 1 },
-      decode: (value: unknown, offsetOrType: unknown): unknown => {
+      decode: Object.assign((value: unknown, offsetOrType: unknown): unknown => {
         if (offsetOrType === 'str16') return (value as FakePtr).text
         if (typeof offsetOrType === 'number') {
           // Vtable slot read: offsets must be multiples of the fake width.
@@ -145,7 +140,9 @@ function installFakeKoffi(world: ComWorld): void {
         // decode(x, 'void *'): out-buffer read or vtable read.
         if (outBuffers.has(value)) return outBuffers.get(value)
         return { owner: value as FakePtr }
-      },
+      }, {
+        string16: (value: unknown) => (value as FakePtr).text as string,
+      }),
       call: (fn: { call: (args: unknown[]) => number }, _proto: unknown, _self: unknown, ...args: unknown[]) => fn.call(args),
     },
   }))
@@ -271,10 +268,6 @@ describe('the worker entry over a mocked process boundary', () => {
   const installBoundary = (): { posted: { kind: string; message?: string }[] } => {
     const posted: { kind: string; message?: string }[] = []
     process.env.DSH_DIALOG_TITLE = 'Pick'
-    // Never invoke the post callback: it runs the worker's disconnect(), and
-    // this process is IPC-connected under the forks pool — severing vitest's
-    // own channel would kill the test worker. The real close lifecycle
-    // belongs to built-worker.e2e.ts.
     ;(process as { send?: unknown }).send = (message: { kind: string }) => {
       posted.push(message)
       return true

@@ -18,7 +18,7 @@ export interface Win32DialogWorkerLike {
    */
   on(event: 'message', listener: (message: Win32DialogWorkerMessage) => void): unknown
   on(event: 'error', listener: (error: Error) => void): unknown
-  on(event: 'exit', listener: (code: number) => void): unknown
+  on(event: 'exit', listener: (code: number | null) => void): unknown
   /**
    * Force-stop the child; the abort path's last resort when `WM_CLOSE`
    * never lands (e.g. the dialog window was never created).
@@ -30,6 +30,8 @@ export interface Win32DialogWorkerLike {
    * child stuck in the native modal call never blocks process exit.
    */
   unref?(): void
+  /** Child stderr, when captured by the host. */
+  stderr?: { on(event: 'data', listener: (chunk: Buffer) => void): unknown } | null
 }
 
 /** Injectable process surface for deterministic driver tests. */
@@ -76,6 +78,11 @@ export async function pickWin32Directory(
   let dialogThreadId: number | undefined
   let closeTimer: NodeJS.Timeout | undefined
   let settled = false
+  let stderr = ''
+  worker.stderr?.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString()
+    process.stderr.write(chunk)
+  })
 
   return await new Promise<string | null>((resolve, reject) => {
     const settle = (outcome: () => void): void => {
@@ -83,6 +90,7 @@ export async function pickWin32Directory(
       settled = true
       if (closeTimer !== undefined) clearInterval(closeTimer)
       signal.removeEventListener('abort', onAbort)
+      worker.kill()
       worker.unref?.()
       outcome()
     }
@@ -107,7 +115,6 @@ export async function pickWin32Directory(
         attempts += 1
         if (attempts > CLOSE_MAX_ATTEMPTS) {
           settle(() => {
-            worker.kill()
             reject(new Error('native directory picker aborted (dialog unresponsive; worker killed)'))
           })
           return
@@ -150,9 +157,13 @@ export async function pickWin32Directory(
         reject(error)
       })
     })
-    worker.on('exit', () => {
+    worker.on('exit', (code: number | null) => {
       settle(() => {
-        reject(new Error('win32 folder dialog worker exited before reporting a result'))
+        const detail = stderr.trim()
+        const suffix = detail.length > 0 ? `: ${detail}` : code !== 0 && code !== null
+          ? ` (exit ${String(code)})`
+          : ''
+        reject(new Error(`win32 folder dialog worker exited before reporting a result${suffix}`))
       })
     })
   })

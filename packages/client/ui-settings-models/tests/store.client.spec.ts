@@ -70,6 +70,20 @@ function api(overrides: {
 }
 
 describe('ModelsSettingsStore', () => {
+  it('treats an active OAuth route as configured without a persisted profile', async () => {
+    const namespaces = NAMESPACES.map(namespace => namespace.ns === 'llm-pi-ai'
+      ? { ...namespace, value: { providers: {} }, user: { providers: {} }, base: { providers: {} } }
+      : namespace) as unknown as typeof NAMESPACES
+    const { face, seenRefs } = api({
+      describeSettings: () => Promise.resolve(ok({ writable: true, hasDocument: false, namespaces })),
+    })
+    const store = new ModelsSettingsStore(face)
+    await store.load()
+    const oauth = store.store.getSnapshot().rows.find(row => row.entry.provider === 'openai')
+    expect(oauth).toMatchObject({ configured: true, removable: false, apiKeyEnv: undefined, credential: undefined })
+    expect(seenRefs).toEqual([['DEEPSEEK_API_KEY']])
+  })
+
   it('joins rows with configured, removable, and credential state', async () => {
     const { face, seenRefs } = api()
     const store = new ModelsSettingsStore(face)
