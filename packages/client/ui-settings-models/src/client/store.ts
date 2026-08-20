@@ -7,7 +7,7 @@
  */
 
 import type {
-  ConfigurableProviderView, CredentialView, IApiClient, SettingsNamespaceView,
+  ConfigurableProviderView, CredentialView, IApiClient, ModelCatalogFailure, ModelProviderGroup, SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
@@ -40,6 +40,12 @@ export interface ModelsSettingsState {
   error: string | null
   /** Credential enrichment failure; provider/settings rows remain usable. */
   credentialError: string | null
+  /** Successful provider-grouped model catalog, including OAuth routes. */
+  modelGroups: readonly ModelProviderGroup[]
+  /** Provider-local catalog failures that do not invalidate provider settings. */
+  modelFailures: readonly ModelCatalogFailure[]
+  /** Transport or whole-catalog failure; tier choices remain editable. */
+  modelCatalogError: string | null
   /** Whether the settings provider accepts writes. */
   writable: boolean
   /** Every configurable provider joined with its configured/credential state. */
@@ -99,7 +105,7 @@ function apiKeyEnvOf(namespace: SettingsNamespaceView | undefined, path: readonl
 export class ModelsSettingsStore {
   /** The snapshot the section renders from (uSES-safe store). */
   readonly store: SnapshotStore<ModelsSettingsState> = createSnapshotStore<ModelsSettingsState>({
-    status: 'idle', error: null, credentialError: null, writable: false, rows: [], namespaces: new Map(),
+    status: 'idle', error: null, credentialError: null, modelGroups: [], modelFailures: [], modelCatalogError: null, writable: false, rows: [], namespaces: new Map(),
   })
 
   /** Latest load wins; an older response never overwrites a newer one. */
@@ -119,6 +125,15 @@ export class ModelsSettingsStore {
   async load(): Promise<void> {
     const generation = ++this.generation
     this.store.update((s) => { s.status = 'loading'; s.error = null })
+    // Start the catalog request with the provider/settings join. Catalog
+    // failures are deliberately contained; the final snapshot retains the
+    // provider/settings result even when the catalog answers with a failure.
+    const modelResponsePromise = this.api.llm.models({}).then(response => response.result.ok
+      ? { groups: response.result.value.groups, failures: response.result.value.failures, error: null }
+      : { groups: [] as ModelProviderGroup[], failures: [] as ModelCatalogFailure[], error: response.result.error.message },
+    ).catch((error: unknown) => ({
+      groups: [] as ModelProviderGroup[], failures: [] as ModelCatalogFailure[], error: messageOf(error),
+    }))
     let providers: ConfigurableProviderView[]
     let writable: boolean
     let views: SettingsNamespaceView[]
@@ -178,11 +193,15 @@ export class ModelsSettingsStore {
         credentialError = messageOf(error)
       }
     }
+    const modelCatalog = await modelResponsePromise
     if (generation !== this.generation) return
     this.store.update((s) => {
       s.status = 'ready'
       s.error = null
       s.credentialError = credentialError
+      s.modelGroups = modelCatalog.groups
+      s.modelFailures = modelCatalog.failures
+      s.modelCatalogError = modelCatalog.error
       s.writable = writable
       s.rows = rows.map(row => ({
         ...row,

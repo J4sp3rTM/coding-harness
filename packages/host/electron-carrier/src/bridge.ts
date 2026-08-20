@@ -77,7 +77,7 @@ function incoming(request: Request): IncomingMessage {
   const message = body as unknown as IncomingMessage & { socket: unknown }
   message.method = request.method
   message.url = `${url.pathname}${url.search}`
-  message.headers = nodeHeaders(request) as IncomingMessage['headers']
+  message.headers = nodeHeaders(request)
   message.httpVersion = '1.1'
   // Trust checks read the peer address. A custom-scheme request has no peer:
   // it originates inside this process, from our own renderer, so loopback is
@@ -148,12 +148,12 @@ export function bridgeExchange(request: Request): BridgedExchange {
   }
 
   const setHeader = (name: string, value: string | readonly string[]): void => {
-    if (Array.isArray(value)) {
+    if (typeof value !== 'string') {
       headers.delete(name)
       for (const entry of value) headers.append(name, entry)
       return
     }
-    headers.set(name, String(value))
+    headers.set(name, value)
   }
 
   const applyHeaderBag = (bag: unknown): void => {

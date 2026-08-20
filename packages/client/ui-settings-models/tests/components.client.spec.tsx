@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
-import type { RpcResponse, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
+import type { IApiClient, RpcResponse, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import {
   ModelsSection, needsSetup, providerCopy, providerTargetLabel, removeProviderProfile,
 } from '../src/client/ModelsSection.tsx'
@@ -123,6 +123,32 @@ function wireNamespaces(): SettingsNamespaceView[] {
   ]
 }
 
+function developmentNamespace(revision = 4, value: unknown = {
+  tiers: {
+    t2: { provider: 'oauth-live', model: 'frontier', reasoningEffort: 'high' },
+    t3: { provider: 'stale-route', model: 'retired-model', reasoningEffort: 'retired-effort' },
+  },
+}): SettingsNamespaceView {
+  return {
+    ns: 'development-workflow', schema: {}, value, user: value,
+    applies: 'live', secrets: [], revision,
+  }
+}
+
+function tierModels() {
+  return {
+    groups: [{ id: 'oauth-live', name: 'OAuth Live', models: [{
+      id: 'frontier',
+      name: 'Frontier',
+      reasoning: {
+        efforts: [{ id: 'medium', name: 'Medium' }, { id: 'high', name: 'High' }],
+        defaultEffort: 'medium',
+      },
+    }] }],
+    failures: [{ id: 'broken-route', name: 'Broken Route', message: 'catalog unavailable' }],
+  }
+}
+
 let nextRpc = 0
 function ok<T>(value: T): RpcResponse<T> {
   return { rpcId: `r-${nextRpc++}` as never, result: { ok: true, value } }
@@ -146,6 +172,7 @@ function scriptedFace(overrides: {
   const mutate = overrides.mutate ?? vi.fn(() => Promise.resolve(ok(wireNamespaces()[2])))
   const set = overrides.set ?? vi.fn(() => Promise.resolve(ok({})))
   const unset = overrides.unset ?? vi.fn(() => Promise.resolve(ok({})))
+  const models = vi.fn<IApiClient['llm']['models']>(() => Promise.resolve(ok({ groups: [], failures: [] })))
   const face = {
     llm: {
       providers: vi.fn(() => Promise.resolve(ok({
@@ -158,7 +185,7 @@ function scriptedFace(overrides: {
           { provider: 'plain', displayName: 'plain', settingsNs: 'llm-plain', settingsPath: ['profiles', 'plain'], active: false },
         ],
       }))),
-      models: vi.fn(() => Promise.resolve(ok({ groups: [], failures: [] }))),
+      models,
     },
     settings: {
       describe: vi.fn(() => Promise.resolve(ok({ writable: true, hasDocument: false, namespaces: wireNamespaces() }))),
@@ -226,6 +253,142 @@ async function mountDeepSeekCard(overrides: Parameters<typeof scriptedFace>[0] =
 }
 
 describe('ModelsSection', () => {
+  it('joins OAuth/live model groups, keeps stale configured routes, and shows provider failures', async () => {
+    const scripted = scriptedFace()
+    scripted.face.settings.describe.mockResolvedValue(ok({
+      writable: true, hasDocument: false, namespaces: [...wireNamespaces(), developmentNamespace()],
+    }))
+    scripted.face.llm.models.mockResolvedValue(ok(tierModels()))
+    await mountFace(scripted)
+    expect(screen.getByLabelText<HTMLSelectElement>(en.tierT2).value).toBe('oauth-live\u0000frontier')
+    expect(screen.getByLabelText<HTMLSelectElement>(`${en.tierT2} · ${en.tierEffort}`).value).toBe('high')
+    expect(screen.getByLabelText<HTMLSelectElement>(en.tierT3).value).toBe('stale-route\u0000retired-model')
+    expect(screen.getByLabelText<HTMLSelectElement>(`${en.tierT3} · ${en.tierEffort}`).value).toBe('retired-effort')
+    expect(screen.getByRole('option', { name: /retired-model/ })).not.toBeNull()
+    expect(screen.getByRole('option', { name: /retired-effort/ })).not.toBeNull()
+    expect(screen.getByText('Broken Route: catalog unavailable')).not.toBeNull()
+  })
+
+  it('applies selected tiers as one set operation with the namespace baseline revision', async () => {
+    const scripted = scriptedFace()
+    const saved = developmentNamespace(5, { tiers: { t1: { provider: 'oauth-live', model: 'frontier' } } })
+    scripted.face.settings.describe.mockResolvedValue(ok({
+      writable: true, hasDocument: false, namespaces: [...wireNamespaces(), developmentNamespace()],
+    }))
+    scripted.face.llm.models.mockResolvedValue(ok(tierModels()))
+    scripted.mutate.mockResolvedValue(ok(saved))
+    await mountFace(scripted)
+    fireEvent.change(screen.getByLabelText(en.tierT1), { target: { value: 'oauth-live\u0000frontier' } })
+    fireEvent.change(screen.getByLabelText(`${en.tierT1} · ${en.tierEffort}`), { target: { value: 'high' } })
+    fireEvent.click(screen.getByRole('button', { name: en.tierApply }))
+    await waitFor(() => { expect(scripted.mutate).toHaveBeenCalledTimes(1) })
+    expect(scripted.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      ns: 'development-workflow', expectedRevision: 4,
+      ops: [{ op: 'set', path: ['tiers'], value: {
+        t1: { provider: 'oauth-live', model: 'frontier', reasoningEffort: 'high' },
+        t2: { provider: 'oauth-live', model: 'frontier', reasoningEffort: 'high' },
+        t3: { provider: 'stale-route', model: 'retired-model', reasoningEffort: 'retired-effort' },
+      } }],
+    }))
+  })
+
+  it('supports different reasoning efforts for the same model tier and clears effort when the model changes', async () => {
+    const scripted = scriptedFace()
+    scripted.face.settings.describe.mockResolvedValue(ok({
+      writable: true, hasDocument: false, namespaces: [...wireNamespaces(), developmentNamespace()],
+    }))
+    scripted.face.llm.models.mockResolvedValue(ok(tierModels()))
+    await mountFace(scripted)
+
+    fireEvent.change(screen.getByLabelText(`${en.tierT2} · ${en.tierEffort}`), { target: { value: 'medium' } })
+    expect(screen.getByLabelText<HTMLSelectElement>(`${en.tierT2} · ${en.tierEffort}`).value).toBe('medium')
+    fireEvent.change(screen.getByLabelText(en.tierT2), { target: { value: '' } })
+    expect(screen.getByLabelText<HTMLSelectElement>(`${en.tierT2} · ${en.tierEffort}`).value).toBe('')
+    expect(screen.getByLabelText<HTMLSelectElement>(`${en.tierT2} · ${en.tierEffort}`).disabled).toBe(true)
+
+    fireEvent.change(screen.getByLabelText(en.tierT2), { target: { value: 'oauth-live\u0000frontier' } })
+    fireEvent.change(screen.getByLabelText(`${en.tierT2} · ${en.tierEffort}`), { target: { value: 'high' } })
+    fireEvent.change(screen.getByLabelText(`${en.tierT3} · ${en.tierEffort}`), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: en.tierApply }))
+    await waitFor(() => { expect(scripted.mutate).toHaveBeenCalledTimes(1) })
+    expect(scripted.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      ops: [{ op: 'set', path: ['tiers'], value: {
+        t2: { provider: 'oauth-live', model: 'frontier', reasoningEffort: 'high' },
+        t3: { provider: 'stale-route', model: 'retired-model' },
+      } }],
+    }))
+  })
+
+  it('uses one unset operation when every tier inherits the parent', async () => {
+    const scripted = scriptedFace()
+    scripted.face.settings.describe.mockResolvedValue(ok({
+      writable: true, hasDocument: false, namespaces: [...wireNamespaces(), developmentNamespace()],
+    }))
+    scripted.face.llm.models.mockResolvedValue(ok(tierModels()))
+    await mountFace(scripted)
+    for (const label of [en.tierT2, en.tierT3]) fireEvent.change(screen.getByLabelText(label), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: en.tierApply }))
+    await waitFor(() => { expect(scripted.mutate).toHaveBeenCalledTimes(1) })
+    expect(scripted.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      expectedRevision: 4, ops: [{ op: 'unset', path: ['tiers'] }],
+    }))
+  })
+
+  it('disables tier editing for read-only and missing settings namespaces', async () => {
+    const readOnly = scriptedFace()
+    readOnly.face.settings.describe.mockResolvedValue(ok({
+      writable: false, hasDocument: false, namespaces: [...wireNamespaces(), developmentNamespace()],
+    }))
+    await mountFace(readOnly)
+    expect(screen.getByLabelText<HTMLSelectElement>(en.tierT1).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: en.tierApply }).disabled).toBe(true)
+    cleanup()
+    const missing = await mountSection()
+    expect(screen.getByLabelText<HTMLSelectElement>(en.tierT1).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: en.tierApply }).disabled).toBe(true)
+    void missing
+  })
+
+  it('retains a dirty draft after business and transport failures', async () => {
+    const scripted = scriptedFace()
+    scripted.face.settings.describe.mockResolvedValue(ok({
+      writable: true, hasDocument: false, namespaces: [...wireNamespaces(), developmentNamespace()],
+    }))
+    scripted.face.llm.models.mockResolvedValue(ok(tierModels()))
+    scripted.mutate.mockResolvedValue(fail('settings rejected'))
+    await mountFace(scripted)
+    fireEvent.change(screen.getByLabelText(en.tierT1), { target: { value: 'oauth-live\u0000frontier' } })
+    fireEvent.click(screen.getByRole('button', { name: en.tierApply }))
+    await screen.findByText('settings rejected')
+    expect(screen.getByLabelText<HTMLSelectElement>(en.tierT1).value).toBe('oauth-live\u0000frontier')
+    scripted.mutate.mockRejectedValueOnce(new Error('transport down'))
+    fireEvent.click(screen.getByRole('button', { name: en.tierApply }))
+    await screen.findByText('transport down')
+    expect(screen.getByLabelText<HTMLSelectElement>(en.tierT1).value).toBe('oauth-live\u0000frontier')
+  })
+
+  it('fences external revisions and advances the retry baseline after conflict', async () => {
+    const scripted = scriptedFace()
+    scripted.face.settings.describe.mockResolvedValue(ok({
+      writable: true, hasDocument: false, namespaces: [...wireNamespaces(), developmentNamespace()],
+    }))
+    scripted.face.llm.models.mockResolvedValue(ok(tierModels()))
+    scripted.mutate.mockResolvedValueOnce({ rpcId: 'conflict' as never, result: { ok: false, error: { code: 'settings-conflict', message: 'changed', details: { actual: 9 } } as never } })
+    const mounted = await mountFace(scripted)
+    fireEvent.change(screen.getByLabelText(en.tierT1), { target: { value: 'oauth-live\u0000frontier' } })
+    // Push a newer host view while the local draft is dirty; the draft must
+    // remain visible and the original baseline must fence the first retry.
+    const latest = mounted.controller.store.getSnapshot()
+    mounted.controller.store.set({ ...latest, namespaces: new Map(latest.namespaces).set('development-workflow', developmentNamespace(9)) })
+    fireEvent.click(screen.getByRole('button', { name: en.tierApply }))
+    await screen.findByText(en.conflict)
+    expect(scripted.mutate).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 4 }))
+    scripted.mutate.mockResolvedValueOnce(ok(developmentNamespace(10, { tiers: { t1: { provider: 'oauth-live', model: 'frontier' } } })))
+    fireEvent.click(screen.getByRole('button', { name: en.tierApply }))
+    await waitFor(() => { expect(scripted.mutate).toHaveBeenCalledTimes(2) })
+    expect(scripted.mutate).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 9 }))
+  })
+
   it('renders an active OAuth-only provider as an editable usable row without a key badge', async () => {
     const scripted = scriptedFace()
     scripted.face.settings.describe.mockResolvedValue(ok({

@@ -16,6 +16,8 @@ For a root transport execution (`exec.parent` absent), the tool also projects th
 
 The browser-safe `@deepseek-ai/dsh-tool-workflow/types` subpath owns these four log-only event payloads and their `SessionEventMap` declaration. The package invariant rejects duplicate starts, unpaired members, terminal events with open members, and updates after run-end on both cold load and live append while accepting missing terminal suffixes.
 
+The `@deepseek-ai/dsh-tool-workflow/recorder` subpath exposes the shared durable recorder for other model-facing workflow consumers; it preserves the same `tool-workflow/*` event contract.
+
 ## Render intent
 
 Decided up front (per the [render-intent Agent Note](../../../.agents/notes/implemented/architecture/2026-07-02-tool-render-intent-union.md)): a `generic` card titled `workflow: <meta.name>`, read directly from `args.meta.name` (presentation is a pure function of args and does not ask the engine to parse); the script text rides as `rawInput`. The result keeps the generic card.

@@ -15,14 +15,9 @@ import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { JsonValue, Session, SessionEventMap } from '@deepseek-ai/dsh-session'
-import type {
-  WorkflowResult, WorkflowRun, WorkflowRunId, WorkflowStopReason,
-} from '@deepseek-ai/dsh-workflow'
-import type {
-  ToolWorkflowAgentEndData, ToolWorkflowAgentStartData,
-  ToolWorkflowRunEndData, ToolWorkflowRunStartData,
-} from './types.ts'
+import type { JsonValue } from '@deepseek-ai/dsh-session'
+import type { WorkflowResult } from '@deepseek-ai/dsh-workflow'
+import { createWorkflowRecorder } from './recorder.ts'
 // Declaration merge only: makes ctx.systemPrompt visible for the section registration.
 import type {} from '@deepseek-ai/dsh-system-prompt'
 
@@ -44,91 +39,6 @@ export const Config: z<Config> = z.object({
 
 type ResolvedConfig = Required<Config>
 
-interface WorkflowRecorder {
-  start(session: Session, run: WorkflowRun): void
-  finish(runId: WorkflowRunId, stopReason: WorkflowStopReason): void
-  abandon(runId: WorkflowRunId): void
-}
-
-interface ToolWorkflowRecordEventMap {
-  'tool-workflow/run-start': ToolWorkflowRunStartData
-  'tool-workflow/agent-start': ToolWorkflowAgentStartData
-  'tool-workflow/agent-end': ToolWorkflowAgentEndData
-  'tool-workflow/run-end': ToolWorkflowRunEndData
-}
-
-/** Render a contained recording failure without trusting the thrown value. */
-function renderRecordingError(error: unknown): string {
-  try {
-    return String(error)
-  } catch {
-    return '[unrenderable thrown value]'
-  }
-}
-
-/**
- * Project active top-level workflow runs into their parent Sessions without
- * letting recording failure affect tool execution.
- */
-function createWorkflowRecorder(ctx: Context): WorkflowRecorder {
-  const active = new Map<WorkflowRunId, Session>()
-  const append = <Type extends keyof ToolWorkflowRecordEventMap>(
-    session: Session,
-    type: Type,
-    data: SessionEventMap[Type],
-  ): boolean => {
-    // These four package-owned events are all log-only. Narrowing the generic
-    // append face here discharges Session.append's conditional options tuple.
-    const appendRecord = session.append.bind(session) as <Event extends keyof ToolWorkflowRecordEventMap>(
-      event: Event,
-      value: SessionEventMap[Event],
-    ) => void
-    try {
-      appendRecord(type, data)
-      return true
-    } catch (error: unknown) {
-      ctx.logger.warn(`tool-workflow: disabled durable record after ${type} append failed: ${renderRecordingError(error)}`)
-      return false
-    }
-  }
-
-  ctx.on('workflow/agent-start', (info, agent) => {
-    const session = active.get(info.id)
-    if (session === undefined) return
-    const data: ToolWorkflowAgentStartData = {
-      runId: info.id,
-      seq: agent.seq,
-      label: agent.label,
-      ...agent.phase === undefined ? {} : { phase: agent.phase },
-      childId: agent.childId,
-    }
-    if (!append(session, 'tool-workflow/agent-start', data)) active.delete(info.id)
-  })
-  ctx.on('workflow/agent-end', (info, agent) => {
-    const session = active.get(info.id)
-    if (session === undefined) return
-    const data: ToolWorkflowAgentEndData = {
-      runId: info.id,
-      seq: agent.seq,
-      outcome: agent.outcome,
-    }
-    if (!append(session, 'tool-workflow/agent-end', data)) active.delete(info.id)
-  })
-
-  return {
-    start(session, run) {
-      if (append(session, 'tool-workflow/run-start', { runId: run.id, name: run.meta.name })) {
-        active.set(run.id, session)
-      }
-    },
-    finish(runId, stopReason) {
-      const session = active.get(runId)
-      if (session !== undefined) append(session, 'tool-workflow/run-end', { runId, stopReason })
-      active.delete(runId)
-    },
-    abandon: (runId) => { active.delete(runId) },
-  }
-}
 
 /**
  * The script-authoring contract, embedded in the tool description. This IS the
@@ -140,7 +50,7 @@ const DESCRIPTION = `Run a JavaScript workflow script that orchestrates subagent
 The workflow's identity rides the \`meta\` parameter as JSON: required \`name\` (short kebab-case) and \`description\` strings, optional \`whenToUse\` string and \`phases\` array (\`{title, detail?, provider?, model?}\`). The \`script\` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO \`export const meta\` statement — meta is a parameter, not code), running with top-level await; end with \`return <value>\` — the value must be JSON-serializable and is this tool's result.
 
 Script-body hooks:
-- \`agent(prompt, opts?): Promise<any>\` — run one subagent to completion. Without \`opts.schema\` it resolves to the child's final text; with \`opts.schema\` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves \`null\` when the child fails (filter with \`.filter(Boolean)\`). Other opts: \`label\` (display), \`phase\` (progress group), and independent \`provider\`/\`model\` LLM target overrides (either may be provided alone). Anything else (\`effort\`/\`isolation\`/\`agentType\`) is rejected loudly.
+- \`agent(prompt, opts?): Promise<any>\` — run one subagent to completion. Without \`opts.schema\` it resolves to the child's final text; with \`opts.schema\` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves \`null\` when the child fails (filter with \`.filter(Boolean)\`). Other opts: \`label\` (display), \`phase\` (progress group), independent \`provider\`/\`model\` LLM target overrides (either may be provided alone), and \`effort\` for the selected model's reasoning level. Anything else (\`isolation\`/\`agentType\`) is rejected loudly.
 - \`pipeline(items, ...stages): Promise<any[]>\` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives \`(prev, item, index)\`. An ordinary stage throw drops that ITEM to \`null\` and skips its remaining stages.
 - \`parallel(thunks): Promise<any[]>\` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to \`null\`.
 - \`phase(title)\` — start a progress phase; \`log(message)\` — narrate progress; \`args\` — the tool call's \`args\` input, verbatim.

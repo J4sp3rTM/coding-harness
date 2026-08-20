@@ -12,7 +12,7 @@
  * re-renders from pushed invalidations or the post-apply reload.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
 import { Button, IconPlusOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -66,6 +66,199 @@ interface ProviderEditorRenderProps extends Pick<
   'namespace' | 'api' | 't' | 'readOnly' | 'onClose'
 > {
   target: EditorTarget
+}
+
+type DevelopmentTier = 't1' | 't2' | 't3'
+interface DevelopmentTierSelection { provider: string; model: string; reasoningEffort?: string }
+type DevelopmentTierDraft = Partial<Record<DevelopmentTier, DevelopmentTierSelection>>
+
+const DEVELOPMENT_WORKFLOW_NS = 'development-workflow'
+const TIER_KEYS: readonly DevelopmentTier[] = ['t1', 't2', 't3']
+
+function tierDraftOf(namespace: import('@deepseek-ai/dsh-api-remotes/client').SettingsNamespaceView | undefined): DevelopmentTierDraft {
+  if (namespace === undefined || typeof namespace.value !== 'object' || namespace.value === null) return {}
+  const tiers = (namespace.value as { tiers?: unknown }).tiers
+  if (typeof tiers !== 'object' || tiers === null) return {}
+  const draft: DevelopmentTierDraft = {}
+  for (const key of TIER_KEYS) {
+    const route = (tiers as Record<string, unknown>)[key]
+    if (typeof route !== 'object' || route === null) continue
+    const provider = (route as { provider?: unknown }).provider
+    const model = (route as { model?: unknown }).model
+    const reasoningEffort = (route as { reasoningEffort?: unknown }).reasoningEffort
+    if (typeof provider === 'string' && typeof model === 'string' && provider.length > 0 && model.length > 0) {
+      draft[key] = {
+        provider,
+        model,
+        ...typeof reasoningEffort === 'string' && reasoningEffort.length > 0 ? { reasoningEffort } : {},
+      }
+    }
+  }
+  return draft
+}
+
+function routeKey(route: DevelopmentTierSelection): string {
+  return `${route.provider}\u0000${route.model}`
+}
+
+function conflictRevision(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null) return undefined
+  const details = (error as { details?: unknown }).details
+  if (typeof details !== 'object' || details === null) return undefined
+  const actual = (details as { actual?: unknown }).actual
+  return typeof actual === 'number' && Number.isSafeInteger(actual) ? actual : undefined
+}
+
+/** The host-owned T1/T2/T3 route editor shown below provider settings. */
+function DevelopmentTiersCard({ state, controller, api, t }: { state: ModelsSettingsState; controller: ModelsSettingsStore; api: ModelsSectionInjected['api']; t: ModelsSectionInjected['t'] }): ReactNode {
+  const namespace = state.namespaces.get(DEVELOPMENT_WORKFLOW_NS)
+  const [draft, setDraft] = useState<DevelopmentTierDraft>(() => tierDraftOf(namespace))
+  const [expectedRevision, setExpectedRevision] = useState<number | undefined>(() => namespace?.revision)
+  const [dirty, setDirty] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [error, setError] = useState<string | undefined>()
+  const [saved, setSaved] = useState(false)
+  useEffect(() => {
+    // A pushed document revision may race an open draft. Keep that draft so
+    // Apply carries the revision it was edited against and can report a
+    // conflict instead of silently replacing the user's work.
+    if (dirty) return
+    setDraft(tierDraftOf(namespace))
+    setExpectedRevision(namespace?.revision)
+    setDirty(false)
+    setError(undefined)
+  }, [namespace?.revision, dirty])
+
+  const groups = state.modelGroups
+  const failures = state.modelFailures
+  const readOnly = namespace === undefined || !state.writable
+  const apply = (): void => {
+    if (namespace === undefined || readOnly || applying) return
+    const selected = Object.fromEntries(TIER_KEYS.flatMap(key => draft[key] === undefined ? [] : [[key, draft[key]]]))
+    const anySelected = Object.keys(selected).length > 0
+    setApplying(true)
+    setError(undefined)
+    setSaved(false)
+    void api.settings.mutate({
+      ns: DEVELOPMENT_WORKFLOW_NS,
+      ...expectedRevision === undefined ? {} : { expectedRevision },
+      ops: anySelected
+        ? [{ op: 'set', path: ['tiers'], value: selected }]
+        : [{ op: 'unset', path: ['tiers'] }],
+    }).then((response) => {
+      if (!response.result.ok) {
+        if (response.result.error.code === 'settings-conflict') {
+          const actual = conflictRevision(response.result.error)
+          if (actual !== undefined) setExpectedRevision(actual)
+          setError(t('conflict'))
+        } else {
+          setError(response.result.error.message)
+        }
+        return
+      }
+      setDraft(tierDraftOf(response.result.value))
+      setExpectedRevision(response.result.value.revision)
+      setDirty(false)
+      setSaved(true)
+      void controller.load()
+    }).catch((thrown: unknown) => {
+      setError(messageOf(thrown))
+    }).finally(() => { setApplying(false) })
+  }
+
+  const optionGroups = (current: DevelopmentTierSelection | undefined): ReactNode[] => {
+    const known = new Set<string>()
+    const result = groups.map(group => (
+      <optgroup key={group.id} label={group.name}>
+        {group.models.map((model) => {
+          const value = routeKey({ provider: group.id, model: model.id })
+          known.add(value)
+          return <option key={value} value={value}>{model.name === model.id ? model.id : `${model.name} (${model.id})`}</option>
+        })}
+      </optgroup>
+    ))
+    if (current !== undefined && !known.has(routeKey(current))) {
+      result.push(<optgroup key={`unavailable-${routeKey(current)}`} label={`${current.provider} (${t('tierUnavailable')})`}><option value={routeKey(current)}>{current.model} ({t('tierUnavailable')})</option></optgroup>)
+    }
+    return result
+  }
+
+  return (
+    <section className={styles['tierCard']} aria-labelledby="development-agent-tiers">
+      <h3 id="development-agent-tiers" className={styles['tierTitle']}>{t('tierTitle')}</h3>
+      <p className={styles['intro']}>{t('tierIntro')}</p>
+      {namespace === undefined ? <p className={styles['notice']}>{t('tierUnavailableSettings')}</p> : null}
+      {state.modelCatalogError === null ? null : <p className={styles['notice']}>{`${t('tierCatalogError')}: ${state.modelCatalogError}`}</p>}
+      {failures.map(failure => <p key={failure.id} className={styles['notice']}>{`${failure.name}: ${failure.message}`}</p>)}
+      {TIER_KEYS.map((key) => {
+        const current = draft[key]
+        const reasoning = current === undefined
+          ? undefined
+          : groups.find(group => group.id === current.provider)?.models.find(model => model.id === current.model)?.reasoning
+        const knownEfforts = reasoning?.efforts ?? []
+        const effortUnavailable = current?.reasoningEffort !== undefined
+          && !knownEfforts.some(effort => effort.id === current.reasoningEffort)
+        const effortLabel = `${t(`tier${key.toUpperCase()}` as 'tierT1' | 'tierT2' | 'tierT3')} · ${t('tierEffort')}`
+        return (
+          <div key={key} className={styles['tierRow']}>
+            <span className={styles['fieldLabel']}>{t(`tier${key.toUpperCase()}` as 'tierT1' | 'tierT2' | 'tierT3')}</span>
+            <div className={styles['tierControls']}>
+              <select
+                id={`development-tier-${key}`}
+                className={`${styles['input']} ${styles['selectInput']}`}
+                aria-label={t(`tier${key.toUpperCase()}` as 'tierT1' | 'tierT2' | 'tierT3')}
+                value={current === undefined ? '' : routeKey(current)}
+                disabled={readOnly || applying}
+                onChange={(event) => {
+                  const value = event.target.value
+                  const separator = value.indexOf('\u0000')
+                  setDraft(previous => ({
+                    ...previous,
+                    ...(value === ''
+                      ? { [key]: undefined }
+                      : { [key]: { provider: value.slice(0, separator), model: value.slice(separator + 1) } }),
+                  }))
+                  setDirty(true)
+                  setSaved(false)
+                  setError(undefined)
+                }}
+              >
+                <option value="">{t('tierInherit')}</option>
+                {optionGroups(current)}
+              </select>
+              <select
+                id={`development-tier-${key}-effort`}
+                className={`${styles['input']} ${styles['selectInput']}`}
+                aria-label={effortLabel}
+                value={current?.reasoningEffort ?? ''}
+                disabled={readOnly || applying || current === undefined || (reasoning === undefined && !effortUnavailable)}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setDraft((previous) => {
+                    const route = previous[key]
+                    if (route === undefined) return previous
+                    const { reasoningEffort: _previousEffort, ...base } = route
+                    return { ...previous, [key]: value === '' ? base : { ...base, reasoningEffort: value } }
+                  })
+                  setDirty(true)
+                  setSaved(false)
+                  setError(undefined)
+                }}
+              >
+                <option value="">{t('tierEffortDefault')}</option>
+                {knownEfforts.map(effort => <option key={effort.id} value={effort.id}>{effort.name}</option>)}
+                {effortUnavailable ? <option value={current.reasoningEffort}>{`${current.reasoningEffort} (${t('tierUnavailable')})`}</option> : null}
+              </select>
+            </div>
+            <p className={styles['tierHelp']}>{t(`tier${key.toUpperCase()}Help` as 'tierT1Help' | 'tierT2Help' | 'tierT3Help')}</p>
+          </div>
+        )
+      })}
+      {error === undefined ? null : <p className={styles['error']} role="alert">{error}</p>}
+      {saved ? <p className={styles['savedNotice']} role="status" aria-live="polite">{t('tierSaved')}</p> : null}
+      <button type="button" className={styles['primaryButton']} disabled={readOnly || !dirty || applying} onClick={apply}>{applying ? t('tierApplying') : t('tierApply')}</button>
+    </section>
+  )
 }
 
 /** Render an editor for either the setup posture or an expanded provider row. */
@@ -276,6 +469,7 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
       <h2 className={styles['title']}>{t('title')}</h2>
       <p className={styles['intro']}>{t('intro')}</p>
       {!state.writable && state.status === 'ready' ? <p className={styles['notice']}>{t('readOnly')}</p> : null}
+      <DevelopmentTiersCard state={state} controller={controller} api={api} t={t} />
       {savedIdentity === undefined
         ? null
         : (

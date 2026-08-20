@@ -27,7 +27,7 @@ The workflow's `meta` is host-provided data, not evaluated script text. The engi
 
 Inside the worker, the script receives `args` and these hooks:
 
-- `agent(prompt, { label, phase, schema, model })` starts one host-side subagent. With a schema it returns the structured value; otherwise it returns final text. An ordinary failed child yields `null`.
+- `agent(prompt, { label, phase, schema, provider, model, effort })` starts one host-side subagent. Provider, model, and model-specific reasoning effort are independent route overrides. With a schema it returns the structured value; otherwise it returns final text. An ordinary failed child yields `null`.
 - `parallel(thunks)` runs thunks under the configured concurrency limit.
 - `pipeline(items, ...stages)` passes `(previous, item, index)` without a cross-stage barrier.
 - `phase(title)` and `log(message)` emit observer narration.
@@ -91,7 +91,7 @@ An owning consumer may set `WorkflowStartRequest.subagentProvider` and `Workflow
 
 #### What the model sees
 
-Every script `agent()` call sends its prompt verbatim and optional model or structured-output schema to a subagent provider. Each child sees that provider's own context; phase and log narration stays on observer events.
+Every script `agent()` call sends its prompt verbatim and optional provider, model, model-specific reasoning effort, or structured-output schema to a subagent provider. Each child sees that provider's own context; phase and log narration stays on observer events.
 
 #### Token effect
 
@@ -99,7 +99,7 @@ Potentially many independent child contexts are paid, bounded by `maxConcurrentA
 
 #### KV Cache effect
 
-Independent of the parent request cache and of sibling children. Each child can reuse only a byte-identical prefix under its own provider, model, prompt, and schema; its later history grows append-only.
+Independent of the parent request cache and of sibling children. Each child can reuse only a byte-identical prefix under its own provider, model, reasoning effort, prompt, and schema; its later history grows append-only.
 
 ### Parent tool result, indirectly
 
