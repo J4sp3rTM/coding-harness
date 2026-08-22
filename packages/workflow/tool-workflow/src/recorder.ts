@@ -58,6 +58,10 @@ export function createWorkflowRecorder(ctx: Context): WorkflowRecorder {
       label: agent.label,
       ...agent.phase === undefined ? {} : { phase: agent.phase },
       childId: agent.childId,
+      ...agent.provider === undefined ? {} : { provider: agent.provider },
+      ...agent.model === undefined ? {} : { model: agent.model },
+      ...agent.effort === undefined ? {} : { effort: agent.effort },
+      ...agent.effortSource === undefined ? {} : { effortSource: agent.effortSource },
     }
     if (!append(session, 'tool-workflow/agent-start', data)) active.delete(info.id)
   })

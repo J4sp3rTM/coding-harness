@@ -111,6 +111,15 @@ describe('LocalLlmOAuthService', () => {
     expect(updated).toEqual(['anthropic'])
   })
 
+  it('reports a non-refreshable grant as signed in', async () => {
+    const ctx = await boot()
+    login.mockResolvedValue({ ...credential, refresh: '', expires: Number.MAX_SAFE_INTEGER })
+    await expect(ctx.llmOAuth.login('anthropic', interaction()))
+      .resolves.toMatchObject({ signedIn: true, expiresAt: Number.MAX_SAFE_INTEGER })
+    await expect(ctx.llmOAuth.accounts())
+      .resolves.toEqual([expect.objectContaining({ signedIn: true })])
+  })
+
   it('hands the flow a surface that reaches the caller', async () => {
     const ctx = await boot()
     login.mockImplementation(async (piInteraction) => {

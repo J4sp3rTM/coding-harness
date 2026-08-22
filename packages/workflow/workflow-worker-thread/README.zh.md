@@ -91,7 +91,7 @@ worker 错误、消息失败或提前退出会在清理前关闭消息接纳，�
 
 #### 模型看到的内容
 
-脚本每次调用 `agent()`，都会把提示词原样发送给 subagent 提供方，并附带可选的 provider、model、该模型专属的推理等级或结构化输出 schema。每个子 agent 看到该提供方自己的上下文；phase 和 log 叙述只留在观察器事件中。
+脚本每次调用 `agent()`，都会把提示词原样发送给 subagent 提供方，并附带可选的 provider、model、该模型专属的推理等级或结构化输出 schema。每个子 agent 看到该提供方自己的上下文；phase 和 log 叙述只留在观察器事件中。`workflow/agent-start` 会记录这些路由覆盖，以及推理等级是配置的还是沿用提供方默认；子 agent 的第一次模型请求记录生效推理等级。
 
 #### Token 影响
 

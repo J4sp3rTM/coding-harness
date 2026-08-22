@@ -21,7 +21,7 @@ export interface DevelopmentWorkflowSettings {
     t1?: DevelopmentTierRoute
     /** Implementation, inspection, and validation. */
     t2?: DevelopmentTierRoute
-    /** Simple low-risk repetition. */
+    /** Simple low-risk repetitive or mechanical work. */
     t3?: DevelopmentTierRoute
   }
 }

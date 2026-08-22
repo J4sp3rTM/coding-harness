@@ -23,6 +23,17 @@ export interface ToolWorkflowAgentStartData {
   readonly label: string
   readonly phase?: string
   readonly childId: SessionId
+  /** Provider override passed to this child; omitted when the call inherited the parent provider. */
+  readonly provider?: string
+  /** Model override passed to this child; omitted when the call inherited the parent model. */
+  readonly model?: string
+  /** Configured reasoning effort passed to this child; omitted when the call used the provider default. */
+  readonly effort?: string
+  /**
+   * Whether `effort` was supplied on the `agent()` call (`configured`) or omitted so
+   * the selected model's provider default applies (`provider-default`).
+   */
+  readonly effortSource?: 'configured' | 'provider-default'
 }
 
 /** Settles one previously started workflow member. */
@@ -47,7 +58,7 @@ declare module '@deepseek-ai/dsh-session/types' {
     'tool-workflow/run-start': ToolWorkflowRunStartData
     /**
      * Records one published workflow member.
-     * @param data - run identity, member sequence, display identity, and child Session.
+     * @param data - run identity, member sequence, display identity, child Session, and optional provider/model/effort route.
      */
     'tool-workflow/agent-start': ToolWorkflowAgentStartData
     /**

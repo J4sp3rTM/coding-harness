@@ -15,6 +15,34 @@ import type { WorkflowResult, WorkflowRun } from '@deepseek-ai/dsh-workflow'
 import { createWorkflowRecorder } from '@deepseek-ai/dsh-tool-workflow/recorder'
 import { DEVELOPMENT_WORKFLOW_SETTINGS_NAMESPACE, type DevelopmentWorkflowSettings } from './settings.ts'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import {
+  routeTier,
+  shouldDelegate,
+  type DevelopmentRole,
+  type DevelopmentComplexity,
+  type DevelopmentRisk,
+  type DevelopmentTier,
+} from './route.ts'
+
+export {
+  classifyProcessCompletion,
+  classifyRenderedShellResult,
+  type ProcessCompletion,
+  type ValidationClassification,
+  type ValidationStatus,
+} from './status.ts'
+export {
+  isTinyNonRepetitive,
+  legacyRouteTier,
+  routeTier,
+  shouldDelegate,
+  type DevelopmentComplexity,
+  type DevelopmentRisk,
+  type DevelopmentRole,
+  type DevelopmentTier,
+  type RoutingPolicy,
+  type WorkUnitSignals,
+} from './route.ts'
 
 export const name = 'tool-development-workflow'
 export const inject = ['tools', 'workflowEngine', 'systemPrompt']
@@ -39,42 +67,38 @@ export interface Config {
   maxHandoffChars?: number
   /** Maximum parent-facing result text. */
   maxResultChars?: number
+  /**
+   * When true (the default), refuse a call whose every unit is a tiny
+   * non-repetitive 1–2 file change so the parent completes it without workers.
+   */
+  refuseTinyNonRepetitive?: boolean
+  /** Maximum declared scopes still treated as a tiny change when refusing. Default 2. */
+  tinyMaxFiles?: number
 }
 
 export const Config: z<Config> = z.object({
   maxWorkUnits: z.natural().min(1).default(8),
   maxHandoffChars: z.natural().min(1).default(16_384),
   maxResultChars: z.natural().min(1).default(16_384),
+  refuseTinyNonRepetitive: z.boolean().default(true),
+  tinyMaxFiles: z.natural().min(1).default(2),
 })
-
-type Role = 'implementation' | 'inspection' | 'validation' | 'review'
-type Complexity = 'simple' | 'ordinary' | 'complex'
-type Risk = 'low' | 'medium' | 'high'
-type Tier = 'T1' | 'T2' | 'T3'
 
 interface WorkUnit {
   id: string
-  role: Role
+  role: DevelopmentRole
   task: string
-  complexity?: Complexity
-  risk?: Risk
+  complexity?: DevelopmentComplexity
+  risk?: DevelopmentRisk
   exceptional?: boolean
+  repetitive?: boolean
   scopes?: string[]
 }
 
-interface ResolvedUnit extends WorkUnit { tier: Tier; route: TierRoute }
+interface ResolvedUnit extends WorkUnit { tier: DevelopmentTier; route: TierRoute }
 interface CallArgs { objective: string; plan: string; workUnits: WorkUnit[]; parallel?: boolean }
 
-/**
- * Resolve the minimum tier from role, complexity and risk.
- * @param unit - the model-selected work-unit signals.
- * @returns the deployment tier selected for the unit.
- */
-export function routeTier(unit: Pick<WorkUnit, 'role' | 'complexity' | 'risk' | 'exceptional'>): Tier {
-  if (unit.role === 'review' && unit.exceptional === true) return 'T1'
-  if ((unit.complexity ?? 'ordinary') === 'simple' && (unit.risk ?? 'medium') === 'low') return 'T3'
-  return 'T2'
-}
+type ResolvedConfig = Required<Pick<Config, 'maxWorkUnits' | 'maxHandoffChars' | 'maxResultChars' | 'refuseTinyNonRepetitive' | 'tinyMaxFiles'>>
 
 function normalized(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) throw new Error(`${label} must be a non-empty normalized string`)
@@ -93,12 +117,14 @@ function scopesOverlap(left: string, right: string, workspaceCwd: string): boole
   return a === b || descendant(a, b) || descendant(b, a)
 }
 
-function resolveConfig(config: Config): Required<Pick<Config, 'maxWorkUnits' | 'maxHandoffChars' | 'maxResultChars'>> {
+function resolveConfig(config: Config): ResolvedConfig {
   const maxWorkUnits = config.maxWorkUnits ?? 8
   const maxHandoffChars = config.maxHandoffChars ?? 16_384
   const maxResultChars = config.maxResultChars ?? 16_384
-  if (![maxWorkUnits, maxHandoffChars, maxResultChars].every(value => Number.isSafeInteger(value) && value > 0)) throw new TypeError('development workflow limits must be positive safe integers')
-  return { maxWorkUnits, maxHandoffChars, maxResultChars }
+  const refuseTinyNonRepetitive = config.refuseTinyNonRepetitive !== false
+  const tinyMaxFiles = config.tinyMaxFiles ?? 2
+  if (![maxWorkUnits, maxHandoffChars, maxResultChars, tinyMaxFiles].every(value => Number.isSafeInteger(value) && value > 0)) throw new TypeError('development workflow limits must be positive safe integers')
+  return { maxWorkUnits, maxHandoffChars, maxResultChars, refuseTinyNonRepetitive, tinyMaxFiles }
 }
 
 function resolvedTierRoutes(ctx: Context): { t1: TierRoute; t2: TierRoute; t3: TierRoute } {
@@ -109,7 +135,7 @@ function resolvedTierRoutes(ctx: Context): { t1: TierRoute; t2: TierRoute; t3: T
 
 function resolveUnits(
   args: CallArgs,
-  config: ReturnType<typeof resolveConfig>,
+  config: ResolvedConfig,
   workspaceCwd: string,
   tiers: { t1: TierRoute; t2: TierRoute; t3: TierRoute },
 ): ResolvedUnit[] {
@@ -117,7 +143,7 @@ function resolveUnits(
   const ids = new Set<string>()
   const scopes: string[] = []
   const units = args.workUnits.map((unit, index) => {
-    const allowed = new Set(['id', 'role', 'task', 'complexity', 'risk', 'exceptional', 'scopes'])
+    const allowed = new Set(['id', 'role', 'task', 'complexity', 'risk', 'exceptional', 'repetitive', 'scopes'])
     for (const key of Object.keys(unit)) if (!allowed.has(key)) throw new Error(`workUnits[${index}] contains unknown field: ${key}`)
     const id = normalized(unit.id, `workUnits[${index}].id`)
     const task = normalized(unit.task, `workUnits[${index}].task`)
@@ -128,6 +154,7 @@ function resolveUnits(
     if (unit.complexity !== undefined && !['simple', 'ordinary', 'complex'].includes(unit.complexity)) throw new Error(`workUnits[${index}].complexity is invalid`)
     if (unit.risk !== undefined && !['low', 'medium', 'high'].includes(unit.risk)) throw new Error(`workUnits[${index}].risk is invalid`)
     if (unit.exceptional !== undefined && typeof unit.exceptional !== 'boolean') throw new Error(`workUnits[${index}].exceptional must be boolean`)
+    if (unit.repetitive !== undefined && typeof unit.repetitive !== 'boolean') throw new Error(`workUnits[${index}].repetitive must be boolean`)
     if (unit.scopes !== undefined && (!Array.isArray(unit.scopes) || !unit.scopes.every(scope => typeof scope === 'string'))) throw new Error(`workUnits[${index}].scopes must be strings`)
     const selected = routeTier(unit)
     if (args.parallel === true) {
@@ -143,6 +170,7 @@ function resolveUnits(
       ...unit.complexity === undefined ? {} : { complexity: unit.complexity },
       ...unit.risk === undefined ? {} : { risk: unit.risk },
       ...unit.exceptional === undefined ? {} : { exceptional: unit.exceptional },
+      ...unit.repetitive === undefined ? {} : { repetitive: unit.repetitive },
       ...unit.scopes === undefined ? {} : { scopes: unit.scopes },
       tier: selected,
       route: tiers[selected.toLowerCase() as 't1' | 't2' | 't3'],
@@ -177,7 +205,10 @@ if (args.parallel === true) {
 return { objective: args.objective, reports }
 `
 
-const DESCRIPTION = 'Submit the minimum planned development work units after you have made a plan. Use roles implementation, inspection, validation, or exceptional review. Routes are selected automatically: T3 for simple low-risk repetition, T2 for ordinary work, and T1 only for exceptional review. Configured tier provider/model fields are optional; omitted fields inherit the parent route. A configured reasoning effort applies to that tier\'s selected model; omission uses its provider default. Work runs sequentially unless you explicitly assert independent, non-overlapping scopes with parallel: true. Workers return structured reports; the parent must inspect diffs, run authoritative validation, and decide whether another delegation is needed. Do not use this for trivial work.'
+const DESCRIPTION = 'Submit the minimum planned development work units after you have made a plan. Do not call this for a tiny non-repetitive 1-2 file change with no research and no parallelism; complete that as the parent. Mark repetitive: true only for mechanical repetition across multiple similar elements. Routes are selected automatically: T3 only for simple low-risk repetitive work, T2 for ordinary multi-file implementation/inspection/validation, and T1 only when exceptional is true (architecture, difficult diagnosis, exceptional risk, or high-value final review). simple + low-risk alone is not T3. Configured tier provider/model fields are optional; omitted fields inherit the parent route. A configured reasoning effort applies to that tier\'s selected model; omission uses its provider default. Work runs sequentially unless you explicitly assert independent, non-overlapping scopes with parallel: true. Workers return structured reports; the parent must inspect diffs, run authoritative validation, and decide whether another delegation is needed.'
+
+/** Error text when every unit is a tiny non-repetitive change the parent should keep. */
+export const TINY_WORK_REFUSED = 'delegate_work refused: this is a tiny non-repetitive change (about 1-2 files, simple, low-risk, not repetitive). Complete it as the parent without delegation.'
 
 function stopError(result: WorkflowResult): string | undefined {
   switch (result.stopReason) {
@@ -208,7 +239,7 @@ function presentResult(_args: CallArgs, _result: { content: ContentBlock[]; isEr
 export function apply(ctx: Context, config: Config): void {
   const resolved = resolveConfig(config)
   const recorder = createWorkflowRecorder(ctx)
-  ctx.systemPrompt.section({ name: 'tool:delegate_work', order: 116.25, text: 'Use the delegate_work tool only after planning a non-trivial coding task. Choose the minimum work units. Prefer T3 for low-risk repetition, T2 for implementation/inspection/validation, and T1 rarely for exceptional review. The parent always reviews diffs, runs authoritative validation, and owns the final decision.' })
+  ctx.systemPrompt.section({ name: 'tool:delegate_work', order: 116.25, text: 'Use delegate_work only after planning work that needs workers: repetitive mechanical edits, multi-file implementation, or exceptional review. Do not delegate a tiny non-repetitive 1-2 file change. T3 requires repetitive work; T2 is the default for ordinary implementation; T1 only when exceptional. Always inspect diffs and run authoritative validation.' })
   ctx.tools.register(defineTool({
     name: 'delegate_work',
     description: DESCRIPTION,
@@ -217,7 +248,7 @@ export function apply(ctx: Context, config: Config): void {
       plan: { type: 'string', required: true, description: 'The parent plan that workers must follow.' },
       parallel: { type: 'boolean', description: 'Assert that all units have independent, non-overlapping scopes. Defaults to sequential execution.' },
       workUnits: { type: 'array', required: true, description: 'Minimum planned work units.', items: { type: 'object', additionalProperties: false, properties: {
-        id: { type: 'string', required: true }, task: { type: 'string', required: true }, role: { type: 'string', required: true, enum: ['implementation', 'inspection', 'validation', 'review'] }, complexity: { type: 'string', enum: ['simple', 'ordinary', 'complex'] }, risk: { type: 'string', enum: ['low', 'medium', 'high'] }, exceptional: { type: 'boolean' }, scopes: { type: 'array', items: { type: 'string' } },
+        id: { type: 'string', required: true }, task: { type: 'string', required: true }, role: { type: 'string', required: true, enum: ['implementation', 'inspection', 'validation', 'review'] }, complexity: { type: 'string', enum: ['simple', 'ordinary', 'complex'] }, risk: { type: 'string', enum: ['low', 'medium', 'high'] }, exceptional: { type: 'boolean' }, repetitive: { type: 'boolean', description: 'True only for mechanical repetition across multiple similar elements. Required for T3.' }, scopes: { type: 'array', items: { type: 'string' } },
       } } },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { runId: { type: 'string', required: true }, agentsStarted: { type: 'integer', required: true }, result: { type: 'json', required: true } } }, render: (_args, value) => [{ type: 'text', text: render(value.result as unknown as { objective: string; reports: unknown[] }, resolved.maxResultChars) }] },
@@ -231,6 +262,9 @@ export function apply(ctx: Context, config: Config): void {
       // an already-started workflow.
       const tiers = resolvedTierRoutes(ctx)
       const units = resolveUnits(args, resolved, workspaceCwd, tiers)
+      if (!shouldDelegate(units, { refuseTinyNonRepetitive: resolved.refuseTinyNonRepetitive, tinyMaxFiles: resolved.tinyMaxFiles })) {
+        throw new Error(TINY_WORK_REFUSED)
+      }
       const run: WorkflowRun = ctx.workflowEngine.start({ script: SCRIPT, meta: { name: 'development-workflow', description: 'Execute minimum planned development work units.' }, args: { objective, plan, units, parallel: args.parallel === true }, maxTotalAgents: units.length, parent, signal: exec.signal })
       const recordsRun = exec.parent === undefined
       if (recordsRun) recorder.start(parent.session, run)

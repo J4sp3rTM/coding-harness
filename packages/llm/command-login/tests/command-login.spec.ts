@@ -96,7 +96,7 @@ describe('/login', () => {
     const { ctx, asked, run } = await boot({ answer: 'openai-codex', offered: [ANTHROPIC, CODEX] })
     await run('/login')
     expect(asked[0]?.questions[0]?.options?.map(option => option.label)).toEqual(['anthropic', 'openai-codex'])
-    expect(asked[0]?.questions[0]?.detail).toContain('not signed in')
+    expect(asked[0]?.questions[0]?.detail).toBeUndefined()
     expect(await ctx.llmOAuth.status('openai-codex')).toMatchObject({ signedIn: true })
   })
 

@@ -38,7 +38,15 @@ function traceFor(
 
 /** Assert the immutable identity fields shared by an agent pair. */
 function validateAgentEnd(start: WorkflowAgentInfo, end: WorkflowAgentEndInfo, fail: InvariantFailure): void {
-  if (start.label !== end.label || start.phase !== end.phase || start.childId !== end.childId) {
+  if (
+    start.label !== end.label
+    || start.phase !== end.phase
+    || start.childId !== end.childId
+    || start.provider !== end.provider
+    || start.model !== end.model
+    || start.effort !== end.effort
+    || start.effortSource !== end.effortSource
+  ) {
     fail(`workflow/agent-end identity diverges from workflow/agent-start for seq ${end.seq}`)
   }
   const outcome: string = end.outcome

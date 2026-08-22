@@ -10,6 +10,7 @@ import { WorkflowEngine, WorkflowRunId } from '@deepseek-ai/dsh-workflow'
 import type { WorkflowResult, WorkflowStartRequest } from '@deepseek-ai/dsh-workflow'
 import * as developmentWorkflow from '../src/index.ts'
 import * as developmentWorkflowSettings from '../src/settings.ts'
+import { isTinyNonRepetitive, legacyRouteTier, routeTier, shouldDelegate } from '../src/route.ts'
 
 class TestSettings extends SettingsProvider {
   private readonly testDocument: Record<string, unknown> = {}
@@ -76,6 +77,34 @@ function execute(ctx: Context, arguments_: unknown, parent?: Agent, signal = new
 
 const unit = { id: 'inspect', role: 'inspection' as const, task: 'Inspect the changed files.', complexity: 'ordinary' as const, risk: 'low' as const }
 
+describe('development-workflow routing policy', () => {
+  it('does not select T3 for a tiny non-repetitive simple low-risk unit', () => {
+    const tiny = { role: 'implementation' as const, complexity: 'simple' as const, risk: 'low' as const, scopes: ['src/greet.js'] }
+    expect(routeTier(tiny)).toBe('T2')
+    expect(legacyRouteTier(tiny)).toBe('T3')
+    expect(isTinyNonRepetitive(tiny)).toBe(true)
+    expect(shouldDelegate([tiny])).toBe(false)
+  })
+
+  it('selects T3 for repetitive mechanical simple low-risk work', () => {
+    const repetitive = { role: 'implementation' as const, complexity: 'simple' as const, risk: 'low' as const, repetitive: true, scopes: ['src/ops.js'] }
+    expect(routeTier(repetitive)).toBe('T3')
+    expect(shouldDelegate([repetitive])).toBe(true)
+  })
+
+  it('selects T2 for ordinary multi-file implementation', () => {
+    const medium = { role: 'implementation' as const, complexity: 'ordinary' as const, risk: 'medium' as const, scopes: ['a.js', 'b.js', 'c.js'] }
+    expect(routeTier(medium)).toBe('T2')
+    expect(shouldDelegate([medium])).toBe(true)
+  })
+
+  it('selects T1 for exceptional architecture, diagnosis, or high-value review', () => {
+    expect(routeTier({ role: 'review', exceptional: true })).toBe('T1')
+    expect(routeTier({ role: 'inspection', exceptional: true, complexity: 'complex', risk: 'high' })).toBe('T1')
+    expect(shouldDelegate([{ role: 'review', exceptional: true }])).toBe(true)
+  })
+})
+
 describe('dsh-tool-development-workflow', () => {
   it('routes by default and starts the fixed workflow with a matching cap', async () => {
     const { ctx, engine, parent } = await setup()
@@ -96,7 +125,7 @@ describe('dsh-tool-development-workflow', () => {
     const pending = execute(ctx, { objective: 'x', plan: 'p', workUnits: [
       { id: 'review', role: 'review', task: 'Find concrete defects.', exceptional: true },
       { id: 'implement', role: 'implementation', task: 'Implement the planned change.', complexity: 'complex', risk: 'high' },
-      { id: 'repeat', role: 'inspection', task: 'Repeat a low-risk check.', complexity: 'simple', risk: 'low' },
+      { id: 'repeat', role: 'inspection', task: 'Repeat a low-risk check.', complexity: 'simple', risk: 'low', repetitive: true },
     ] }, parent)
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(engine.requests.at(-1)!.args).toMatchObject({ units: [
@@ -179,6 +208,61 @@ describe('dsh-tool-development-workflow', () => {
     expect((await execute(ctx, { objective: 'x', plan: 'p', workUnits: [unit] })).isError).toBe(true)
     engine.startError = new Error('engine unavailable')
     expect((await execute(ctx, { objective: 'x', plan: 'p', workUnits: [unit] }, parent)).isError).toBe(true)
+  })
+
+  it('refuses a tiny non-repetitive 1-2 file unit instead of starting workers', async () => {
+    const { ctx, engine, parent } = await setup()
+    const result = await execute(ctx, {
+      objective: 'Fix one greeting.',
+      plan: 'Edit greet.js.',
+      workUnits: [{ id: 'fix', role: 'implementation', task: 'Fix greet.js.', complexity: 'simple', risk: 'low', scopes: ['src/greet.js'] }],
+    }, parent)
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result)).toContain(developmentWorkflow.TINY_WORK_REFUSED)
+    expect(engine.requests).toHaveLength(0)
+  })
+
+  it('still starts a repetitive simple low-risk unit on T3', async () => {
+    const { ctx, engine, parent } = await setup()
+    const pending = execute(ctx, {
+      objective: 'Fill five returns.',
+      plan: 'Same mechanical edit five times.',
+      workUnits: [{ id: 'ops', role: 'implementation', task: 'Add return to five ops.', complexity: 'simple', risk: 'low', repetitive: true, scopes: ['src/ops.js'] }],
+    }, parent)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(engine.requests[0]!.args).toMatchObject({ units: [{ tier: 'T3' }] })
+    engine.settle({ value: { objective: 'Fill five returns.', reports: [] }, stopReason: 'completed', agentsStarted: 1 })
+    expect((await pending).isError).toBe(false)
+  })
+
+  it('routes ordinary multi-file implementation to T2 and exceptional review to T1', async () => {
+    const { ctx, engine, parent } = await setup()
+    const pending = execute(ctx, {
+      objective: 'Ship a store and review the contract rename.',
+      plan: 'Implement then review.',
+      workUnits: [
+        { id: 'implement', role: 'implementation', task: 'Implement the store.', complexity: 'ordinary', risk: 'medium', scopes: ['src/store.js', 'src/validate.js', 'src/index.js'] },
+        { id: 'review', role: 'review', task: 'Review the cross-component rename.', exceptional: true, scopes: ['src'] },
+      ],
+    }, parent)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(engine.requests[0]!.args).toMatchObject({ units: [{ tier: 'T2' }, { tier: 'T1' }] })
+    engine.settle({ value: { objective: 'Ship a store and review the contract rename.', reports: [] }, stopReason: 'completed', agentsStarted: 2 })
+    await pending
+  })
+
+  it('can disable tiny-work refusal from config', async () => {
+    const { ctx, engine, parent } = await setup({ refuseTinyNonRepetitive: false })
+    const pending = execute(ctx, {
+      objective: 'Fix one greeting.',
+      plan: 'Edit greet.js.',
+      workUnits: [{ id: 'fix', role: 'implementation', task: 'Fix greet.js.', complexity: 'simple', risk: 'low', scopes: ['src/greet.js'] }],
+    }, parent)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(engine.requests).toHaveLength(1)
+    expect(engine.requests[0]!.args).toMatchObject({ units: [{ tier: 'T2' }] })
+    engine.settle({ value: { objective: 'Fix one greeting.', reports: [] }, stopReason: 'completed', agentsStarted: 1 })
+    await pending
   })
 
   it('unregisters the tool and prompt section on HMR disposal', async () => {

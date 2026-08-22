@@ -8,7 +8,7 @@ Sign-in is a conversation, not a form: the flow hands out an authorization URL o
 
 ## Commands
 
-- `/login` — sign in to the only offered route, or ask which one when several are offered. The chooser lists each route with its subscription label and current state.
+- `/login` — sign in to the only offered route, or ask which one when several are offered. The chooser lists each route with its subscription label.
 - `/login <provider>` — go straight to that route.
 - `/logout <provider>` — remove this machine's stored token set for that route.
 
@@ -39,4 +39,4 @@ None directly; neither command touches the request prefix. A route switched onto
 
 ## Known Limitations and Deferred Work
 
-- **No account status command** — `accounts()` is on the seam, and a status line belongs to whichever UI renders one; a `/login` with several routes offered shows it in passing.
+- **No account status command** — `accounts()` is on the seam, and a status line belongs to whichever UI renders one.

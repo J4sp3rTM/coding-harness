@@ -51,7 +51,7 @@ export type {
 export interface LlmOAuthToken {
   /** Bearer token sent with provider requests. */
   access: string
-  /** Token exchanged for a fresh {@link access} when it expires. */
+  /** Token exchanged for a fresh {@link access}; empty when the provider issues a non-refreshable grant. */
   refresh: string
   /** Epoch milliseconds after which {@link access} must be refreshed. */
   expires: number

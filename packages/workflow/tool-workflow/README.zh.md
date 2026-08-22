@@ -16,7 +16,7 @@
 
 浏览器安全的 `@deepseek-ai/dsh-tool-workflow/types` 子路径拥有这四类 log-only 事件 payload 及其 `SessionEventMap` 声明。包 invariant 会在冷加载和实时追加时拒绝重复 start、未配对成员、仍有开放成员的终点和 run-end 后更新，同时允许缺失终态后缀的连续前缀。
 
-`@deepseek-ai/dsh-tool-workflow/recorder` 子路径向其他面向模型的工作流消费方公开共享的持久记录器，并保持相同的 `tool-workflow/*` 事件约定。
+`@deepseek-ai/dsh-tool-workflow/recorder` 子路径向其他面向模型的工作流消费方公开共享的持久记录器，并保持相同的 `tool-workflow/*` 事件约定。成员 start 会从工作流事件复制可选的 provider、model、已配置推理等级，以及 `effortSource`（`configured` 或 `provider-default`）。这些字段不含凭据。
 
 ## 渲染意图
 

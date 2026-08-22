@@ -7,7 +7,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentCapabilities, SubagentProvider, SubagentResult, SubagentRun, SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
-import type { WorkflowMeta, WorkflowResult, WorkflowResultInfo, WorkflowRun, WorkflowRunInfo } from '@deepseek-ai/dsh-workflow'
+import type { WorkflowAgentInfo, WorkflowMeta, WorkflowResult, WorkflowResultInfo, WorkflowRun, WorkflowRunInfo } from '@deepseek-ai/dsh-workflow'
 import * as workerEngineModule from '../src/index.ts'
 import WorkerThreadWorkflowEngine, { type Config } from '../src/index.ts'
 import { workerSpawnEnv } from '../src/host.ts'
@@ -224,6 +224,32 @@ describe('dsh-workflow-worker-thread', () => {
       })
       expect(provider.runs[0]!.request.agentOptions).toEqual({ model: 'deepseek-v4-pro', reasoningEffort: 'high' })
       expect(provider.runs[0]!.request.parent).toBeDefined()
+    })
+
+    it('workflow/agent-start records configured provider, model, and effort', async () => {
+      const { ctx, parent } = await setup({
+        reply: () => ({ output: [], structured: { files: ['x.ts'] }, stopReason: 'completed' }),
+      })
+      const starts: WorkflowAgentInfo[] = []
+      ctx.on('workflow/agent-start', (_info, agent) => { starts.push(agent) })
+      await run(ctx, parent, scripted(`
+        return await agent('list files', { provider: 'mock', model: 'deepseek-v4-pro', effort: 'high', schema: { type: 'object', properties: { files: { type: 'array', items: { type: 'string' } } }, required: ['files'] } })
+      `))
+      expect(starts[0]).toMatchObject({
+        provider: 'mock',
+        model: 'deepseek-v4-pro',
+        effort: 'high',
+        effortSource: 'configured',
+      })
+    })
+
+    it('workflow/agent-start records provider-default effort when agent() omits effort', async () => {
+      const { ctx, parent } = await setup()
+      const starts: WorkflowAgentInfo[] = []
+      ctx.on('workflow/agent-start', (_info, agent) => { starts.push(agent) })
+      await run(ctx, parent, scripted("return await agent('route me')"))
+      expect(starts[0]?.effortSource).toBe('provider-default')
+      expect(starts[0]?.effort).toBeUndefined()
     })
 
     it('agent({provider}) forwards provider-only agentOptions across the thread', async () => {

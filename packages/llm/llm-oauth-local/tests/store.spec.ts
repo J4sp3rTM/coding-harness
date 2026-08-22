@@ -44,7 +44,16 @@ describe('FileOAuthTokenStore', () => {
     expect(commits).toEqual(['anthropic'])
   })
 
-  it('creates the document owner-only', async () => {
+  it('keeps a non-refreshable provider signed in', async () => {
+    const filename = await tempFile()
+    const { store: subject } = store(filename)
+    const accessOnly = token({ refresh: '', expires: Number.MAX_SAFE_INTEGER })
+    await subject.modify('openrouter', () => Promise.resolve(accessOnly))
+    expect(await subject.read('openrouter')).toEqual(accessOnly)
+    expect(await subject.list()).toEqual(['openrouter'])
+  })
+
+  it.skipIf(process.platform === 'win32')('creates the document owner-only', async () => {
     const filename = await tempFile()
     const { store: subject } = store(filename)
     await subject.modify('anthropic', () => Promise.resolve(token()))

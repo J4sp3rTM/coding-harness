@@ -1,0 +1,12 @@
+'use strict'
+const assert = require('node:assert')
+const { user } = require('./src/contract.js')
+const { displayName } = require('./src/read.js')
+const { rename } = require('./src/write.js')
+const { formatUser } = require('./src/format.js')
+const record = user('Ada')
+assert.strictEqual(record.displayName, 'Ada')
+assert.strictEqual(displayName(record), 'Ada')
+assert.strictEqual(formatUser(record), 'user:Ada')
+assert.strictEqual(rename(record, 'Bea').displayName, 'Bea')
+console.log('PASS')

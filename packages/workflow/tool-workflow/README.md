@@ -16,7 +16,7 @@ For a root transport execution (`exec.parent` absent), the tool also projects th
 
 The browser-safe `@deepseek-ai/dsh-tool-workflow/types` subpath owns these four log-only event payloads and their `SessionEventMap` declaration. The package invariant rejects duplicate starts, unpaired members, terminal events with open members, and updates after run-end on both cold load and live append while accepting missing terminal suffixes.
 
-The `@deepseek-ai/dsh-tool-workflow/recorder` subpath exposes the shared durable recorder for other model-facing workflow consumers; it preserves the same `tool-workflow/*` event contract.
+The `@deepseek-ai/dsh-tool-workflow/recorder` subpath exposes the shared durable recorder for other model-facing workflow consumers; it preserves the same `tool-workflow/*` event contract. Member start records copy optional provider, model, configured reasoning effort, and `effortSource` (`configured` vs `provider-default`) from the workflow event. Credentials never appear in these fields.
 
 ## Render intent
 

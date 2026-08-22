@@ -94,6 +94,22 @@ function applyEvent(trace: WorkflowTrace, event: SessionEvent, fail: InvariantFa
         fail('tool-workflow/agent-start phase must be a string when present')
       }
       stringId(data.childId, 'tool-workflow/agent-start childId', fail)
+      for (const key of ['provider', 'model', 'effort'] as const) {
+        if (data[key] !== undefined && (typeof data[key] !== 'string' || data[key].length === 0)) {
+          fail(`tool-workflow/agent-start ${key} must be a non-empty string when present`)
+        }
+      }
+      if (data.effortSource !== undefined
+        && data.effortSource !== 'configured'
+        && data.effortSource !== 'provider-default') {
+        fail('tool-workflow/agent-start effortSource must be configured or provider-default when present')
+      }
+      if (data.effortSource === 'configured' && typeof data.effort !== 'string') {
+        fail('tool-workflow/agent-start configured effortSource requires effort')
+      }
+      if (data.effortSource === 'provider-default' && data.effort !== undefined) {
+        fail('tool-workflow/agent-start provider-default effortSource must omit effort')
+      }
       if (run.members.has(seq)) fail(`tool-workflow/agent-start repeats member seq ${seq} in run ${runId}`)
       run.members.set(seq, false)
       return

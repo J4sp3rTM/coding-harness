@@ -297,7 +297,17 @@ export class WorkflowExecution {
         await run.dispose()
         throw this.cancelledError()
       }
-      const info: WorkflowAgentInfo = { seq, label, ...phase !== undefined ? { phase } : {}, childId: SessionId(run.id) }
+      const info: WorkflowAgentInfo = {
+        seq,
+        label,
+        ...phase !== undefined ? { phase } : {},
+        childId: SessionId(run.id),
+        ...opts.provider !== undefined ? { provider: opts.provider } : {},
+        ...opts.model !== undefined ? { model: opts.model } : {},
+        ...opts.effort !== undefined
+          ? { effort: opts.effort, effortSource: 'configured' }
+          : { effortSource: 'provider-default' },
+      }
       this.observer.agentStart(info)
       try {
         let result

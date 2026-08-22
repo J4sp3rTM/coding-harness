@@ -24,7 +24,7 @@ Workflow events are observe-only. They carry `WorkflowRunInfo` (`id` plus `meta`
 
 - `workflow/start` / `workflow/end` pair the run.
 - `workflow/phase` and `workflow/log` expose script narration.
-- `workflow/agent-start` / `workflow/agent-end` pair each child call by `seq`; a child whose async provider start rejects emits neither.
+- `workflow/agent-start` / `workflow/agent-end` pair each child call by `seq`; a child whose async provider start rejects emits neither. Start payloads may include the `agent()` provider, model, configured effort, and whether that effort was supplied or left to the provider default. The child's first model request records the effective effort on `request/header`.
 
 Same-process event payloads are borrowed immutable values. Every listener is independently contained: a synchronous throw or rejected returned promise is logged without starving peers or changing execution.
 

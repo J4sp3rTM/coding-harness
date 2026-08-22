@@ -91,7 +91,7 @@ An owning consumer may set `WorkflowStartRequest.subagentProvider` and `Workflow
 
 #### What the model sees
 
-Every script `agent()` call sends its prompt verbatim and optional provider, model, model-specific reasoning effort, or structured-output schema to a subagent provider. Each child sees that provider's own context; phase and log narration stays on observer events.
+Every script `agent()` call sends its prompt verbatim and optional provider, model, model-specific reasoning effort, or structured-output schema to a subagent provider. Each child sees that provider's own context; phase and log narration stays on observer events. `workflow/agent-start` records those route overrides and whether effort was configured or left to the provider default; the child's first model request records the effective effort.
 
 #### Token effect
 
