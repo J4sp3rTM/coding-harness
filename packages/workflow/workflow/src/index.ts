@@ -19,6 +19,7 @@ export type {
   WorkflowAgentEndInfo,
   WorkflowAgentInfo,
   WorkflowAgentOutcome,
+  WorkflowEffortSource,
   WorkflowMeta,
   WorkflowPhase,
   WorkflowResult,
@@ -62,7 +63,7 @@ declare module '@deepseek-ai/cordis' {
      * receives a published run from the provider emits neither
      * event in this pair.
      * @param info - the run's identity snapshot.
-     * @param agent - the call's sequence number, label, phase, and child id.
+     * @param agent - the call's sequence number, label, phase, child id, and optional provider/model/effort route.
      * @mode emit
      */
     'workflow/agent-start'(info: WorkflowRunInfo, agent: WorkflowAgentInfo): void

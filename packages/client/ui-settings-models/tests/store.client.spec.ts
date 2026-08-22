@@ -39,16 +39,22 @@ const NAMESPACES = [
   },
 ]
 
+interface TestModelCatalog {
+  groups: { id: string; name: string; models: { id: string; name: string }[] }[]
+  failures: { id: string; name: string; message: string }[]
+}
+
 function api(overrides: {
   providers?: () => Promise<RpcResponse<{ providers: typeof DIRECTORY }>>
   describeSettings?: () => Promise<RpcResponse<{ writable: boolean; namespaces: typeof NAMESPACES }>>
   describeCredentials?: (refs: string[]) => Promise<RpcResponse<{ credentials: Record<string, unknown> }>>
+  models?: () => Promise<RpcResponse<TestModelCatalog>>
 } = {}) {
   const seenRefs: string[][] = []
   const face = {
     llm: {
       providers: overrides.providers ?? (() => Promise.resolve(ok({ providers: DIRECTORY }))),
-      models: () => Promise.resolve(ok({ groups: [], failures: [] })),
+      models: overrides.models ?? (() => Promise.resolve(ok({ groups: [], failures: [] }))),
     },
     settings: {
       describe: overrides.describeSettings ?? (() => Promise.resolve(ok({ writable: true, hasDocument: false, namespaces: NAMESPACES }))),
@@ -110,6 +116,34 @@ describe('ModelsSettingsStore', () => {
     expect(byProvider.get('anthropic')?.apiKeyEnv).toBeUndefined()
     expect(byProvider.get('ghost')).toMatchObject({ configured: false, removable: false })
     expect(state.namespaces.get('llm-pi-ai')?.ns).toBe('llm-pi-ai')
+  })
+
+  it('retains successful model groups and exposes provider-local catalog failures', async () => {
+    const { face } = api({ models: () => Promise.resolve(ok({
+      groups: [{ id: 'oauth-live', name: 'OAuth Live', models: [{ id: 'frontier', name: 'Frontier' }] }],
+      failures: [{ id: 'broken', name: 'Broken', message: 'catalog unavailable' }],
+    })) })
+    const store = new ModelsSettingsStore(face)
+    await store.load()
+    expect(store.store.getSnapshot()).toMatchObject({
+      status: 'ready', modelGroups: [{ id: 'oauth-live' }],
+      modelFailures: [{ id: 'broken', message: 'catalog unavailable' }], modelCatalogError: null,
+    })
+  })
+
+  it('contains model catalog business and transport failures without breaking provider rows', async () => {
+    const business = new ModelsSettingsStore(api({
+      models: () => Promise.resolve(fail<TestModelCatalog>('catalog rejected')),
+    }).face)
+    await business.load()
+    expect(business.store.getSnapshot().status).toBe('ready')
+    expect(business.store.getSnapshot().modelCatalogError).toBe('catalog rejected')
+    expect(business.store.getSnapshot().rows.length).toBeGreaterThan(0)
+    const transport = new ModelsSettingsStore(api({ models: () => Promise.reject(new Error('catalog transport down')) }).face)
+    await transport.load()
+    expect(transport.store.getSnapshot().status).toBe('ready')
+    expect(transport.store.getSnapshot().modelCatalogError).toBe('catalog transport down')
+    expect(transport.store.getSnapshot().rows.length).toBeGreaterThan(0)
   })
 
   it('degrades the credential badge, not the page, when the credential domain fails', async () => {

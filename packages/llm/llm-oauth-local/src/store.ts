@@ -88,7 +88,10 @@ function readToken(entry: unknown): LlmOAuthToken | undefined {
   if (typeof entry !== 'object' || entry === null) return undefined
   const { access, refresh, expires, ...extra } = entry as Record<string, unknown>
   if (typeof access !== 'string' || access.length === 0) return undefined
-  if (typeof refresh !== 'string' || refresh.length === 0) return undefined
+  // Some providers issue a non-expiring access token without a refresh grant.
+  // The empty string is pi-ai's explicit representation of that credential;
+  // an absent or non-string field still means the durable entry is truncated.
+  if (typeof refresh !== 'string') return undefined
   if (typeof expires !== 'number' || !Number.isFinite(expires)) return undefined
   return { access, refresh, expires, ...Object.keys(extra).length === 0 ? {} : { extra } }
 }

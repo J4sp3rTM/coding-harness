@@ -27,7 +27,7 @@ worker 仍提供实用的隔离：
 
 在 worker 内，脚本会收到 `args` 以及以下钩子：
 
-- `agent(prompt, { label, phase, schema, model })` 启动一个宿主侧 subagent。提供 schema 时返回结构化值，否则返回最终文本。普通子 agent 失败会产生 `null`；
+- `agent(prompt, { label, phase, schema, provider, model, effort })` 启动一个宿主侧 subagent。provider、model 和该模型专属的推理等级是彼此独立的路由覆盖。提供 schema 时返回结构化值，否则返回最终文本。普通子 agent 失败会产生 `null`；
 - `parallel(thunks)` 在已配置的并发限制下运行 thunk；
 - `pipeline(items, ...stages)` 在没有跨阶段屏障的情况下传递 `(previous, item, index)`；
 - `phase(title)` 和 `log(message)` 发出观察器叙述。
@@ -91,7 +91,7 @@ worker 错误、消息失败或提前退出会在清理前关闭消息接纳，�
 
 #### 模型看到的内容
 
-脚本每次调用 `agent()`，都会把提示词原样发送给 subagent 提供方，并附带可选模型或结构化输出 schema。每个子 agent 看到该提供方自己的上下文；phase 和 log 叙述只留在观察器事件中。
+脚本每次调用 `agent()`，都会把提示词原样发送给 subagent 提供方，并附带可选的 provider、model、该模型专属的推理等级或结构化输出 schema。每个子 agent 看到该提供方自己的上下文；phase 和 log 叙述只留在观察器事件中。`workflow/agent-start` 会记录这些路由覆盖，以及推理等级是配置的还是沿用提供方默认；子 agent 的第一次模型请求记录生效推理等级。
 
 #### Token 影响
 
@@ -99,7 +99,7 @@ worker 错误、消息失败或提前退出会在清理前关闭消息接纳，�
 
 #### KV Cache 影响
 
-与父级请求缓存和同级子 agent 缓存相互独立。每个子 agent 只能在其自身提供方、模型、提示词和 schema 下复用逐字节相同的前缀；其后续历史仅追加增长。
+与父级请求缓存和同级子 agent 缓存相互独立。每个子 agent 只能在其自身提供方、模型、推理等级、提示词和 schema 下复用逐字节相同的前缀；其后续历史仅追加增长。
 
 ### 父级工具结果（间接）
 

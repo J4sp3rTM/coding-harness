@@ -164,7 +164,45 @@ describe('durable workflow-record invariants', () => {
     ['unknown workflow event', (session, runId) => {
       appendRaw(session, 'tool-workflow/unknown', { runId })
     }, /unknown tool-workflow event type/],
+    ['configured effortSource without effort', (session, runId) => {
+      session.append('tool-workflow/agent-start', {
+        runId, seq: 1, label: 'one', childId: SessionId('child'), effortSource: 'configured',
+      })
+    }, /configured effortSource requires effort/],
+    ['provider-default effortSource with effort', (session, runId) => {
+      session.append('tool-workflow/agent-start', {
+        runId, seq: 1, label: 'one', childId: SessionId('child'), effort: 'high', effortSource: 'provider-default',
+      })
+    }, /provider-default effortSource must omit effort/],
   ]
+
+  it('accepts configured and provider-default route facts on agent-start', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create(SessionId('workflow-record-route-facts'))
+    const configured = WorkflowRunId('configured')
+    const inherited = WorkflowRunId('inherited')
+    session.append('tool-workflow/run-start', { runId: configured, name: 'configured' })
+    expect(() => session.append('tool-workflow/agent-start', {
+      runId: configured,
+      seq: 1,
+      label: 'worker',
+      childId: SessionId('child-configured'),
+      provider: 'mock',
+      model: 'mock',
+      effort: 'high',
+      effortSource: 'configured',
+    })).not.toThrow()
+    session.append('tool-workflow/agent-end', { runId: configured, seq: 1, outcome: 'completed' })
+    session.append('tool-workflow/run-end', { runId: configured, stopReason: 'completed' })
+    session.append('tool-workflow/run-start', { runId: inherited, name: 'inherited' })
+    expect(() => session.append('tool-workflow/agent-start', {
+      runId: inherited,
+      seq: 1,
+      label: 'worker',
+      childId: SessionId('child-inherited'),
+      effortSource: 'provider-default',
+    })).not.toThrow()
+  })
 
   it.each(invalidCases)('rejects %s', async (_name, mutate, pattern) => {
     const ctx = await setup()

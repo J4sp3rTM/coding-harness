@@ -465,6 +465,22 @@ export interface Config {
 
 Source: [`packages/code-runtime/code-runtime-worker-thread/src/index.ts:25`](../packages/code-runtime/code-runtime-worker-thread/src/index.ts)
 
+<a id="deepseek-aidsh-command-rat"></a>
+
+## `@deepseek-ai/dsh-command-rat`
+
+Requires: `commands` · `systemPrompt`
+
+```ts config-catalog
+/** Configures the complete UTF-8 size limit for one custom prompt. */
+export interface Config {
+  /** Maximum UTF-8 bytes accepted by `/rat <text>`. */
+  maxBytes?: number
+}
+```
+
+Source: [`packages/context/command-rat/src/index.ts:36`](../packages/context/command-rat/src/index.ts)
+
 <a id="deepseek-aidsh-compaction-basic"></a>
 
 ## `@deepseek-ai/dsh-compaction-basic`
@@ -2413,6 +2429,26 @@ export interface Config {
 
 Source: [`packages/shell/tool-bash-persistent/src/index.ts:400`](../packages/shell/tool-bash-persistent/src/index.ts)
 
+<a id="deepseek-aidsh-tool-development-workflow"></a>
+
+## `@deepseek-ai/dsh-tool-development-workflow`
+
+Requires: `tools` · `workflowEngine` · `systemPrompt`
+
+```ts config-catalog
+/** Deployment policy for the fixed development workflow. */
+export interface Config {
+  /** Maximum work units accepted in one call and deployment ceiling. */
+  maxWorkUnits?: number
+  /** Maximum serialized child handoff size. */
+  maxHandoffChars?: number
+  /** Maximum parent-facing result text. */
+  maxResultChars?: number
+}
+```
+
+Source: [`packages/workflow/tool-development-workflow/src/index.ts:35`](../packages/workflow/tool-development-workflow/src/index.ts)
+
 <a id="deepseek-aidsh-tool-fs"></a>
 
 ## `@deepseek-ai/dsh-tool-fs`
@@ -2652,10 +2688,10 @@ export interface Config {
    */
   enableRunInBackground?: boolean
   /**
-   * Background execution policy (default `one-shot`). `one-shot` defaults calls
-   * to foreground; `continuable` defaults them to background, requires a provider
-   * with the `prepareContinuable` capability, and returns the durable child id.
-   * Follow-up adapters remain independently optional.
+   * Background execution policy (default `one-shot`). Calls wait for results by
+   * default; `continuable` enables durable background children when explicitly
+   * requested, requires a provider with the `prepareContinuable` capability, and
+   * returns the durable child id. Follow-up adapters remain independently optional.
    */
   backgroundMode?: 'one-shot' | 'continuable'
   /**
@@ -2799,7 +2835,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/workflow/tool-workflow/src/index.ts:33`](../packages/workflow/tool-workflow/src/index.ts)
+Source: [`packages/workflow/tool-workflow/src/index.ts:28`](../packages/workflow/tool-workflow/src/index.ts)
 
 <a id="deepseek-aidsh-tools"></a>
 
@@ -3101,6 +3137,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-user-questions` ([`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workflow-run` ([`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workspace` ([`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts))
+- `@deepseek-ai/dsh-command-clear` — requires `commands` · `sessions` ([`packages/session/command-clear/src/index.ts`](../packages/session/command-clear/src/index.ts))
 - `@deepseek-ai/dsh-command-compact` — requires `commands` · `compaction` ([`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts))
 - `@deepseek-ai/dsh-command-feedback` — requires `commands` ([`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts))
 - `@deepseek-ai/dsh-command-goal` — requires `commands` · `goals` ([`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts))
@@ -3112,6 +3149,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-goal-round-driver` — requires `agents` · `goals` · `sessions` ([`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-auto` — requires `webServer` · `loader` ([`packages/host/directory-picker-auto/src/index.ts`](../packages/host/directory-picker-auto/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-native` ([`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts))
+- `@deepseek-ai/dsh-host-electron-carrier` ([`packages/host/electron-carrier/src/index.ts`](../packages/host/electron-carrier/src/index.ts))
 - `@deepseek-ai/dsh-host-plugin-inventory` — requires `loader` ([`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts))
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-lsp` ([`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts))

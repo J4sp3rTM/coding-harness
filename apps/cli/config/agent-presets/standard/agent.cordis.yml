@@ -232,6 +232,11 @@
         subagentProvider: spawn
         maxRounds: 64
 
+    # Fixed planned coding delegation. The parent supplies the plan and the
+    # minimum units; workers return evidence for parent review and validation.
+    - id: tool-development-workflow
+      name: '@deepseek-ai/dsh-tool-development-workflow'
+
 # ── remaining model-facing rows ─────────────────────────────────────────────
 
 - id: tool-ask-user

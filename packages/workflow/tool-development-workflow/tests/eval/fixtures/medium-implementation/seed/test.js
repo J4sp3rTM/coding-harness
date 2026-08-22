@@ -1,0 +1,10 @@
+'use strict'
+const assert = require('node:assert')
+const { createCheckedStore } = require('./src/index.js')
+const store = createCheckedStore()
+store.set('a', 1)
+assert.strictEqual(store.get('a'), 1)
+assert.strictEqual(store.has('a'), true)
+assert.strictEqual(store.has('missing'), false)
+assert.throws(() => store.set('', 1))
+console.log('PASS')

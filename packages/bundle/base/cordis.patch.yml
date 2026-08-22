@@ -378,6 +378,11 @@
     - id: tool-workflow
       name: '@deepseek-ai/dsh-tool-workflow'
 
+    # Host singleton settings namespace consumed by the per-session
+    # development workflow tool. User settings override this empty base.
+    - id: development-workflow-settings
+      name: '@deepseek-ai/dsh-tool-development-workflow/settings'
+
     - id: timeout-policy
       name: '@deepseek-ai/dsh-tool-call-timeout-policy'
 

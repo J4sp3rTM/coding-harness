@@ -94,6 +94,9 @@ export interface WorkflowRunInfo {
   meta: WorkflowMeta
 }
 
+/** How one child `agent()` call selected its reasoning effort. */
+export type WorkflowEffortSource = 'configured' | 'provider-default'
+
 /** One `agent()` call's identity within a run (the `workflow/agent-start` payload). */
 export interface WorkflowAgentInfo {
   /** 1-based sequence number of this `agent()` call within the run. */
@@ -104,6 +107,19 @@ export interface WorkflowAgentInfo {
   phase?: string
   /** The child agent's id on the subagent seam. */
   childId: SessionId
+  /** Provider override passed to this child; omission inherits the parent provider. */
+  provider?: string
+  /** Model override passed to this child; omission inherits the parent model. */
+  model?: string
+  /** Configured reasoning effort passed to this child. Omitted when the call used the provider default. */
+  effort?: string
+  /**
+   * Whether `effort` was supplied on the `agent()` call (`configured`) or omitted so
+   * the selected model's provider default applies (`provider-default`).
+   * The child's first model request records the effective effort, including
+   * adapter-filled defaults, on `request/header`.
+   */
+  effortSource?: WorkflowEffortSource
 }
 
 /** How one `agent()` call settled: clean result, child failure (script sees `null`), or run cancellation. */

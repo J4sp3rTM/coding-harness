@@ -12,7 +12,7 @@ import type { WorkerOptions } from 'node:worker_threads'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { assertNever } from '@deepseek-ai/dsh-llm'
+import { assertNever, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { snapshotJsonValue } from '@deepseek-ai/dsh-session'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentRun } from '@deepseek-ai/dsh-subagent'
@@ -354,11 +354,12 @@ export class WorkerRun implements WorkflowRun {
         parent: this.parent,
         signal: this.controller.signal,
         ...request.schema !== undefined ? { outputSchema: request.schema } : {},
-        ...request.provider !== undefined || request.model !== undefined
+        ...request.provider !== undefined || request.model !== undefined || request.effort !== undefined
           ? {
             agentOptions: {
               ...request.provider !== undefined ? { provider: request.provider } : {},
               ...request.model !== undefined ? { model: request.model } : {},
+              ...request.effort !== undefined ? { reasoningEffort: ReasoningEffortId(request.effort) } : {},
             },
           }
           : {},

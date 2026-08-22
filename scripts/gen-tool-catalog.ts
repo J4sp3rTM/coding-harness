@@ -62,6 +62,7 @@ import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
+import * as ToolDevelopmentWorkflow from '@deepseek-ai/dsh-tool-development-workflow'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
 import { githubSlug } from './verify-md-links.ts'
 
@@ -404,6 +405,21 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'A fixed foreground workflow starts one fresh structured child per round; the model selects only the immutable objective and an optional round cap.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-development-workflow',
+    dir: 'tool-development-workflow',
+    source: 'packages/workflow/tool-development-workflow/src/index.ts',
+    requires: ['ctx.tools', 'ctx.workflowEngine', 'ctx.systemPrompt', 'a calling Agent (exec.agent parents every work unit)'],
+    writes: ['tool/call', 'tool/result', 'workflow and child session events during execution'],
+    async mount(ctx) {
+      await ctx.plugin(SubagentRuntime)
+      registerCatalogSubagentProvider(ctx, 'mock')
+      await ctx.plugin(VmWorkflowEngine, { provider: 'mock' })
+      await ctx.plugin(ToolDevelopmentWorkflow)
+    },
+    note:
+      'A fixed planned workflow routes the minimum implementation, inspection, validation, or exceptional-review units and returns structured evidence for parent review.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-skill',

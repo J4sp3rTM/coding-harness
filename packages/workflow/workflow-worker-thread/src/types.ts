@@ -46,6 +46,8 @@ export interface ChildStartRequest {
   provider?: string
   /** The per-child model override, if the call passed one. */
   model?: string
+  /** The selected model's adapter-owned reasoning effort. */
+  effort?: string
 }
 
 /**

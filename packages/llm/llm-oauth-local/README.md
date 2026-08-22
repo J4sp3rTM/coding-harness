@@ -12,7 +12,7 @@ Every read goes to the file, and every write is a read-render-commit cycle under
 
 The document declares a format version. One written by another version is refused rather than migrated, and the diagnostic says to remove it and sign in again — re-earning a token costs one browser round trip, while guessing at an unknown format costs the account.
 
-An entry missing a field reads as signed out rather than failing: a truncated or hand-edited entry is repaired by signing in, and the alternative is a value shaped like a token reaching a provider request.
+An entry missing a field reads as signed out rather than failing: a truncated or hand-edited entry is repaired by signing in, and the alternative is a value shaped like a token reaching a provider request. An empty refresh token is valid for a provider that issues a non-refreshable access grant.
 
 ## The flows
 
@@ -41,7 +41,7 @@ Which routes are offered is therefore the catalog's answer, and a pi-ai upgrade 
 
 ## Using a subscription
 
-Signing in stores a token set; the pi-ai adapter then authenticates that route with the subscription and rotates the token under this store's lock. The route still needs a profile in the `llm-pi-ai` settings section for its models to appear — signing in authenticates a route, it does not create one — and [that package's README](../llm-pi-ai/README.md) owns the `auth` field and the precedence between a stored sign-in and a configured key.
+Signing in stores a token set; the pi-ai adapter then activates an unconfigured catalog route, exposes its models, authenticates it with the subscription, and rotates refreshable tokens under this store's lock. A profile in the `llm-pi-ai` settings section remains authoritative when present, and [that package's README](../llm-pi-ai/README.md) owns the `auth` field and the precedence between a stored sign-in and a configured key.
 
 Signing out removes the token set from this machine. It does not end the session on the provider's side; nothing here can, and the authorization is revoked on the provider's own account page.
 

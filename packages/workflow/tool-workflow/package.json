@@ -26,12 +26,17 @@
       "types": "./lib/types/types.d.ts",
       "default": "./lib/types/types.js"
     },
+    "./recorder": {
+      "types": "./lib/types/recorder.d.ts",
+      "default": "./lib/recorder.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
     "lib/invariant.js",
+    "lib/recorder.js",
     "lib/types/**/*.js",
     "lib/types/**/*.d.ts"
   ],

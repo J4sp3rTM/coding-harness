@@ -24,7 +24,7 @@
 
 - `workflow/start` / `workflow/end` 为运行配对；
 - `workflow/phase` 和 `workflow/log` 公开脚本叙述；
-- `workflow/agent-start` / `workflow/agent-end` 按 `seq` 为每次子 agent 调用配对；提供方的异步启动调用被拒绝时，该子 agent 不会发出其中任何一个事件。
+- `workflow/agent-start` / `workflow/agent-end` 按 `seq` 为每次子 agent 调用配对；提供方的异步启动调用被拒绝时，该子 agent 不会发出其中任何一个事件。start payload 可以包含 `agent()` 的 provider、model、已配置推理等级，以及该等级是显式传入还是沿用提供方默认。子 agent 的第一次模型请求把生效推理等级记在 `request/header` 上。
 
 同进程事件 payload 是以不可变方式借用的值。每个监听器都独立隔离：同步抛出异常或返回的 promise 被拒绝时，只会记录日志，不会阻塞同级监听器或改变执行。
 

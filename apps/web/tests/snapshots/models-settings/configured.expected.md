@@ -19,6 +19,28 @@
     - text: 关闭
   - heading "模型" [level=2]
   - paragraph: 填入各提供方的 API 密钥即可使用其模型。
+  - region "开发 agent 分级":
+    - heading "开发 agent 分级" [level=3]
+    - paragraph: 父级／会话模型仍在编排器中选择。这些路由只用于委派工作和审查。
+    - text: T1 —— 特殊审查
+    - combobox "T1 —— 特殊审查":
+      - option "继承父级模型" [selected]
+    - combobox "T1 —— 特殊审查 · 推理等级" [disabled]:
+      - option "提供方默认推理等级" [selected]
+    - paragraph: 用于 frontier 或特殊审查；只会提升委派的审查工作。
+    - text: T2 —— 实现与检查
+    - combobox "T2 —— 实现与检查":
+      - option "继承父级模型" [selected]
+    - combobox "T2 —— 实现与检查 · 推理等级" [disabled]:
+      - option "提供方默认推理等级" [selected]
+    - paragraph: 用于普通实现、检查和验证。
+    - text: T3 —— 简单且低风险
+    - combobox "T3 —— 简单且低风险":
+      - option "继承父级模型" [selected]
+    - combobox "T3 —— 简单且低风险 · 推理等级" [disabled]:
+      - option "提供方默认推理等级" [selected]
+    - paragraph: 用于简单、重复且低风险的工作。
+    - button "保存分级" [disabled]
   - status: 已保存 minimax-cn。
   - list:
     - listitem:

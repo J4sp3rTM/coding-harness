@@ -22,7 +22,6 @@ import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands
 import type {} from '@deepseek-ai/dsh-user-questions'
 import { isHarnessError } from '@deepseek-ai/dsh-llm'
 import type {
-  LlmOAuthAccount,
   LlmOAuthEvent,
   LlmOAuthInteraction,
   LlmOAuthPrompt,
@@ -201,11 +200,6 @@ function commandInteraction(ctx: Context, agent: Agent, signal: AbortSignal): Co
   }
 }
 
-/** One line of `/login` status for an account. */
-function accountLine(account: LlmOAuthAccount): string {
-  return `${account.provider} — ${account.loginLabel}: ${account.signedIn ? 'signed in' : 'not signed in'}`
-}
-
 /**
  * Resolve which route the human meant: the one they typed, or the one they
  * pick from the offer.
@@ -225,7 +219,6 @@ async function chooseProvider(
   if (only !== undefined) return only.provider
   const chosen = await ask(ctx, invocation.agent, {
     question: 'Which subscription do you want to sign in with?',
-    detail: accounts.map(accountLine).join('\n'),
     options: accounts.map(account => ({ label: account.provider, description: account.loginLabel })),
   }, invocation.signal)
   return chosen
