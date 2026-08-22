@@ -111,6 +111,12 @@ export interface PiAiProviderProfile {
    */
   modelOverrides?: Record<string, PiAiModelOverride>
   /**
+   * Models appended to the installed catalog. Only an installed catalog route
+   * may use this, and it cannot be combined with a non-empty `models` list;
+   * use `modelOverrides` when the id is already installed.
+   */
+  additionalModels?: PiAiModelProfile[]
+  /**
    * Reasoning-dispatch switches for every `openai-completions` model on this
    * route; each model's own `compat` overrides per field. What neither sets
    * keeps the installed catalog entry's value, then pi-ai's baseURL-derived
@@ -162,7 +168,7 @@ export interface PiAiProviderProfile {
 
 /** Validated profile with its route stamped and every adapter-owned default resolved. */
 export interface ResolvedPiAiProviderProfile
-  extends Omit<PiAiProviderProfile, 'apiKeyEnv' | 'retryPolicy' | 'models' | 'displayName'> {
+  extends Omit<PiAiProviderProfile, 'apiKeyEnv' | 'retryPolicy' | 'models' | 'additionalModels' | 'displayName'> {
   /** Harness route key and the `Models` collection key (the configuration dict key). */
   provider: string
   /** Resolved display name for selectors and configuration surfaces. */
@@ -256,6 +262,7 @@ const profile = z.object({
   api: z.union(supportedProtocols()),
   baseURL: z.string(),
   models: z.array(modelProfile),
+  additionalModels: z.array(modelProfile),
   modelOverrides: z.dict(modelOverride),
   compat: compatProfile,
   defaultContextWindow: z.number().step(1).min(1).default(DEFAULT_CONTEXT_WINDOW),
@@ -373,13 +380,14 @@ export function resolveProfiles(
       ...source.api === undefined ? {} : { api: source.api },
       ...source.baseURL === undefined ? {} : { baseURL: source.baseURL },
       ...source.models === undefined ? {} : { models: source.models },
+      ...source.additionalModels === undefined ? {} : { additionalModels: source.additionalModels },
       ...source.modelOverrides === undefined ? {} : { modelOverrides: source.modelOverrides },
       ...source.compat === undefined ? {} : { compat: source.compat },
       defaultInput,
       defaultContextWindow: source.defaultContextWindow ?? DEFAULT_CONTEXT_WINDOW,
       defaultMaxTokens: source.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
     })
-    const { apiKeyEnv, retryPolicy, models: _models, displayName: _displayName, ...rest } = source
+    const { apiKeyEnv, retryPolicy, models: _models, additionalModels: _additionalModels, displayName: _displayName, ...rest } = source
     resolved.set(provider, {
       ...rest,
       provider,

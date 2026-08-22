@@ -23,6 +23,9 @@ import {
   type CodexRunSpec,
 } from './run.ts'
 
+export { codexAppServerArgv } from './run.ts'
+export { CodexAppServerWire } from './wire.ts'
+
 export const name = 'subagent-codex'
 export const inject = ['subagents', 'subprocess']
 

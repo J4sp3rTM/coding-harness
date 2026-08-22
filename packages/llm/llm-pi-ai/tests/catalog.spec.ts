@@ -766,6 +766,63 @@ describe('modelOverrides', () => {
   })
 })
 
+describe('additionalModels', () => {
+  const oxAlpha: LlmPiAi.PiAiModelProfile = {
+    id: 'stealth/ox-alpha',
+    name: 'Ox Alpha',
+    contextWindow: 1_048_576,
+    maxTokens: 131_072,
+    input: ['text', 'image'],
+    reasoningEfforts: { low: 'low', high: 'high', max: 'max' },
+    compat: { thinkingFormat: 'openrouter', supportsReasoningEffort: true },
+  }
+
+  it('appends Ox Alpha to the installed OpenRouter catalog with its declared metadata', () => {
+    const resolved = resolveProfiles({ openrouter: { additionalModels: [oxAlpha] } })
+    const models = resolved.get('openrouter')?.piProvider.getModels() ?? []
+    const model = models.find(entry => entry.id === oxAlpha.id)
+    expect(models).toHaveLength(getBuiltinModels('openrouter').length + 1)
+    expect(model).toMatchObject({
+      provider: 'openrouter',
+      id: 'stealth/ox-alpha',
+      name: 'Ox Alpha',
+      contextWindow: 1_048_576,
+      maxTokens: 131_072,
+      input: ['text', 'image'],
+      reasoning: true,
+      compat: { thinkingFormat: 'openrouter', supportsReasoningEffort: true },
+    })
+    expect(getSupportedThinkingLevels(model as Model<Api>)).toEqual(['low', 'high', 'max'])
+  })
+
+  it('rejects additional models on a hand-declared route', () => {
+    expect(() => resolveProfiles({
+      'acme-gateway': {
+        api: 'openai-completions',
+        baseURL: 'https://acme.test',
+        additionalModels: [oxAlpha],
+      },
+    })).toThrow(/installed catalog does not describe this route/)
+  })
+
+  it('rejects additional models beside a replacement models list', () => {
+    expect(() => resolveProfiles({
+      openrouter: {
+        models: [{ id: 'custom', contextWindow: 1, maxTokens: 1 }],
+        additionalModels: [oxAlpha],
+      },
+    })).toThrow(/additionalModels beside a models list/)
+  })
+
+  it('directs installed ids to modelOverrides', () => {
+    const [installed] = getBuiltinModels('openrouter')
+    if (installed === undefined) throw new Error('the installed catalog ships no openrouter model')
+    expect(() => resolveProfiles({
+      openrouter: { additionalModels: [{ id: installed.id }] },
+    })).toThrow(/use modelOverrides to customize it/)
+  })
+})
+
 describe('reasoning-dispatch compat switches', () => {
   /** The materialized models of one route, keyed by id. */
   function modelsOf(providers: Record<string, LlmPiAi.PiAiProviderProfile>, route: string): Map<string, Model<Api>> {

@@ -269,6 +269,8 @@ export interface RouteCatalogRequest {
   baseURL?: string
   /** Configured catalog; absent means the whole installed catalog for this route. */
   models?: readonly PiAiModelProfile[]
+  /** Models appended to the installed catalog; only valid while `models` is absent or empty. */
+  additionalModels?: readonly PiAiModelProfile[]
   /** Installed-catalog customizations by model id; only meaningful while `models` is absent. */
   modelOverrides?: Readonly<Record<string, PiAiModelOverride>>
   /** Reasoning-dispatch switches for every `openai-completions` model on the route; entries override per field. */
@@ -464,7 +466,28 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
   // schema materializes `[]` for the absent case, and an empty catalog could
   // serve no request anyway, so both mean "serve the installed catalog".
   const configured = request.models ?? []
+  const additional = request.additionalModels ?? []
   const overrides = request.modelOverrides ?? {}
+  if (additional.length > 0 && defaults.size === 0) {
+    invalid(provider, 'sets additionalModels, but the installed catalog does not describe this route;'
+      + ' add the model to a catalog route or declare the complete route with models')
+  }
+  if (additional.length > 0 && configured.length > 0) {
+    invalid(provider, 'sets additionalModels beside a models list; models replaces the served catalog, so'
+      + ' use one list or remove models')
+  }
+  const additionalIds = new Set<string>()
+  for (const entry of additional) {
+    if (entry.id.length === 0) invalid(provider, 'has an additionalModels entry with an empty model id')
+    if (defaults.has(entry.id)) {
+      invalid(provider, `additionalModels names "${entry.id}", which the installed catalog already describes;`
+        + ' use modelOverrides to customize it')
+    }
+    if (additionalIds.has(entry.id)) {
+      invalid(provider, `lists additional model "${entry.id}" more than once`)
+    }
+    additionalIds.add(entry.id)
+  }
   // Every miss is refused, never skipped: an override that lands nowhere is a
   // typo someone would otherwise hunt for in a silently unchanged model.
   for (const [id, override] of Object.entries(overrides)) {
@@ -492,7 +515,10 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
   // the same path with the same diagnostics and request-default semantics.
   const entries: readonly PiAiModelProfile[] = configured.length > 0
     ? configured
-    : [...defaults.values()].map(model => ({ id: model.id, ...overrides[model.id] }))
+    : [
+      ...[...defaults.values()].map(model => ({ id: model.id, ...overrides[model.id] })),
+      ...additional,
+    ]
   if (entries.length === 0) {
     invalid(provider, 'resolves no models; the installed catalog does not describe this route, so its models'
       + ' must be listed in configuration')

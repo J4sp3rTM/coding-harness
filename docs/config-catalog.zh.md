@@ -993,6 +993,12 @@ export interface PiAiProviderProfile {
    */
   modelOverrides?: Record<string, PiAiModelOverride>
   /**
+   * Models appended to the installed catalog. Only an installed catalog route
+   * may use this, and it cannot be combined with a non-empty `models` list;
+   * use `modelOverrides` when the id is already installed.
+   */
+  additionalModels?: PiAiModelProfile[]
+  /**
    * Reasoning-dispatch switches for every `openai-completions` model on this
    * route; each model's own `compat` overrides per field. What neither sets
    * keeps the installed catalog entry's value, then pi-ai's baseURL-derived
@@ -1138,7 +1144,7 @@ type WithheldThinkingFormat = 'baseten' | 'chat-template' | 'qwen-chat-template'
 
 依赖：`Api`（`@earendil-works/pi-ai`）· `CacheRetention`（`@earendil-works/pi-ai`）· `Model`（`@earendil-works/pi-ai`）· `ModelThinkingLevel`（`@earendil-works/pi-ai`）· `OpenAICompletionsCompat`（`@earendil-works/pi-ai`）· [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets`（`@earendil-works/pi-ai`）· `Transport`（`@earendil-works/pi-ai`）
 
-来源：[`packages/llm/llm-pi-ai/src/config.ts:192`](../packages/llm/llm-pi-ai/src/config.ts)
+来源：[`packages/llm/llm-pi-ai/src/config.ts:198`](../packages/llm/llm-pi-ai/src/config.ts)
 
 <a id="deepseek-aidsh-llm-replay"></a>
 
@@ -2173,7 +2179,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/subagent/subagent-codex/src/index.ts:30`](../packages/subagent/subagent-codex/src/index.ts)
+来源：[`packages/subagent/subagent-codex/src/index.ts:33`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 
@@ -2446,10 +2452,17 @@ export interface Config {
   maxHandoffChars?: number
   /** Maximum parent-facing result text. */
   maxResultChars?: number
+  /**
+   * When true (the default), refuse a call whose every unit is a tiny
+   * non-repetitive 1–2 file change so the parent completes it without workers.
+   */
+  refuseTinyNonRepetitive?: boolean
+  /** Maximum declared scopes still treated as a tiny change when refusing. Default 2. */
+  tinyMaxFiles?: number
 }
 ```
 
-来源：[`packages/workflow/tool-development-workflow/src/index.ts:35`](../packages/workflow/tool-development-workflow/src/index.ts)
+来源：[`packages/workflow/tool-development-workflow/src/index.ts:63`](../packages/workflow/tool-development-workflow/src/index.ts)
 
 <a id="deepseek-aidsh-tool-fs"></a>
 
@@ -3212,6 +3225,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-web`（[`packages/client/web/src/index.ts`](../packages/client/web/src/index.ts)）
 - `@deepseek-ai/dsh-client-web-react`（[`packages/client/web-react/src/index.ts`](../packages/client/web-react/src/index.ts)）
 - `@deepseek-ai/dsh-cmdline`（[`packages/boot/cmdline/src/index.ts`](../packages/boot/cmdline/src/index.ts)）
+- `@deepseek-ai/dsh-harness-eval`（[`packages/test-support/harness-eval/src/index.ts`](../packages/test-support/harness-eval/src/index.ts)）
 - `@deepseek-ai/dsh-home-paths`（[`packages/util/home-paths/src/index.ts`](../packages/util/home-paths/src/index.ts)）
 - `@deepseek-ai/dsh-hook-protocol`（[`packages/hooks/hook-protocol/src/index.ts`](../packages/hooks/hook-protocol/src/index.ts)）
 - `@deepseek-ai/dsh-launch-environment`（[`packages/util/launch-environment/src/index.ts`](../packages/util/launch-environment/src/index.ts)）

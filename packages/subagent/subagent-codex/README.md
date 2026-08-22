@@ -57,6 +57,8 @@ The standalone composition below shows the complete explicit capability. A Profi
 
 The production wire intentionally implements only the app-server methods required by this one-shot contract. Development evidence is pinned to `@openai/codex@0.147.0` / `codex-cli 0.147.0`; the npm package is a test-only dependency, and deployments still supply `codex` on `PATH`.
 
+The package root also exports `codexAppServerArgv` and `CodexAppServerWire` for private evaluation and protocol verification. These low-level helpers preserve the same fixed command and one-thread, one-turn protocol limits; production integrations should use the registered `codex` subagent provider.
+
 ## Model Experience
 
 ### Child request

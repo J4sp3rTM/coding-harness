@@ -2,11 +2,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { FIXTURES } from './eval/fixtures.ts'
-import { runAbEval, type AbComparison } from './eval/runner.ts'
-import { main } from './eval/run.ts'
-import { runValidationCommand } from './eval/process.ts'
-import { routeTier, shouldDelegate } from '../src/route.ts'
+import { FIXTURES } from '@deepseek-ai/dsh-harness-eval/src/fixtures.ts'
+import { runValidationCommand, type AbComparison, runAbEval } from '@deepseek-ai/dsh-harness-eval/src/index.ts'
+import { main } from '@deepseek-ai/dsh-harness-eval/src/cli.ts'
+import { legacyRouteTier, routeTier, shouldDelegate } from '../src/route.ts'
 
 const scratchRoots: string[] = []
 
@@ -21,6 +20,8 @@ async function outDir(label: string): Promise<string> {
 }
 
 function assertComparison(comparison: AbComparison, execution: AbComparison['execution']): void {
+  expect(comparison.schemaVersion).toBe(1)
+  expect(comparison.executor).toBeNull()
   expect(comparison.execution).toBe(execution)
   expect(comparison.runs.length).toBe(8)
   const variants = new Set(comparison.runs.map(run => run.variant))
@@ -40,16 +41,27 @@ function assertComparison(comparison: AbComparison, execution: AbComparison['exe
       expect(run.validation.cancelled).toBe(false)
       expect(run.validation.exitCode).toBe(0)
     }
-    expect(run.usage.unavailable.length).toBeGreaterThan(0)
-    expect(run.cost.unavailable.length).toBeGreaterThan(0)
+    expect(run.usage).toBeNull()
+    expect(run.cost).toBeNull()
     if (run.variant === 'A') expect(run.routing.delegated).toBe(false)
   }
 }
 
 describe('A/B eval runner', () => {
+  const routing = (fixture: (typeof FIXTURES)[number], variant: 'A' | 'B') => {
+    const shippedTiers = fixture.units.map(unit => routeTier(unit))
+    const legacyTiers = fixture.units.map(unit => legacyRouteTier(unit))
+    const delegated = shouldDelegate(fixture.units)
+    return variant === 'A'
+      ? { delegated: false, shippedTiers, legacyTiers, notes: ['Variant A is Parent-only: workers are not started.'] }
+      : { delegated, shippedTiers, legacyTiers, notes: [delegated
+        ? 'Variant B would start a delegated workflow under the shipped routing policy.'
+        : 'Variant B would refuse delegation under the shipped policy; the parent keeps the work.'] }
+  }
+
   it('grades seed fixtures as failed from process exit, not stdout', async () => {
     const dir = await outDir('seed')
-    const comparison = await runAbEval({ outDir: dir, repetitions: 1 })
+    const comparison = await runAbEval({ outDir: dir, repetitions: 1, routing })
     assertComparison(comparison, 'keyless-seed')
     expect(comparison.runs.every(run => run.validation.status === 'failed')).toBe(true)
     expect(comparison.runs.every(run => run.validation.exitCode !== 0 && run.validation.exitCode !== null)).toBe(true)
@@ -70,7 +82,7 @@ describe('A/B eval runner', () => {
 
   it('grades oracle overlays as passed only after the process exits 0', async () => {
     const dir = await outDir('oracle')
-    const comparison = await runAbEval({ outDir: dir, applyOracle: true })
+    const comparison = await runAbEval({ outDir: dir, applyOracle: true, routing })
     assertComparison(comparison, 'keyless-oracle')
     expect(comparison.runs.every(run => run.validation.status === 'passed')).toBe(true)
     expect(comparison.runs.every(run => run.diffCorrect === true)).toBe(true)
@@ -92,12 +104,29 @@ describe('A/B eval runner', () => {
       .toEqual(b.runs.map(run => [run.variant, run.category, run.validation.status]))
   })
 
-  it('records a live skip without inventing a Variant B win', async () => {
-    const dir = await outDir('live')
-    const comparison = await runAbEval({ outDir: dir, live: true })
-    expect(comparison.execution).toBe('live-skipped')
-    expect(comparison.liveSkipReason).toMatch(/DEEPSEEK_API_KEY|accepted comparison/)
-    expect(comparison.runs.some(run => run.validation.status === 'passed' && run.execution === 'live')).toBe(false)
+  it('uses an injected executor seam without inventing a live result', async () => {
+    const dir = await outDir('executor')
+    const comparison = await runAbEval({ outDir: dir, executor: async () => {}, routing })
+    expect(comparison.execution).toBe('injected-executor')
+    expect(comparison.runs.every(run => run.execution === 'injected-executor')).toBe(true)
+    expect(comparison.runs.some(run => run.validation.status === 'passed')).toBe(false)
+    expect(comparison.runs.every(run => run.executorProcess === null)).toBe(true)
+  })
+
+  it('keeps executor completion separate from fixture validation and records skips', async () => {
+    const dir = await outDir('executor-evidence')
+    const comparison = await runAbEval({
+      outDir: dir,
+      fixtures: [FIXTURES[0]!],
+      executor: async ({ variant }) => variant === 'A'
+        ? { process: { exitCode: 0, stdout: 'PASS\n', stderr: '' } }
+        : { skipped: { reason: 'credentials are unavailable' } },
+      routing,
+    })
+    expect(comparison.runs[0]!.executorProcess?.status).toBe('passed')
+    expect(comparison.runs[0]!.validation.status).toBe('failed')
+    expect(comparison.runs[1]!.validation.status).toBe('inconclusive')
+    expect(comparison.runs[1]!.skipReason).toBe('credentials are unavailable')
   })
 
   it('times out a hanging validation as inconclusive even if stdout already looks successful', async () => {

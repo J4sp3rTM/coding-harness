@@ -12,6 +12,7 @@
 | [`loader-smoke/`](loader-smoke/README.md) | 启动由 Loader 组合的应用以执行冒烟测试 |
 | [`llm-mock-server/`](llm-mock-server/README.md) | 提供确定性的 OpenAI 兼容故障服务器 |
 | [`llm-replay/`](llm-replay/README.md) | 为无密钥测试和演示回放已记录的模型响应 |
+| [`harness-eval/`](harness-eval/README.md) | 提供确定性的 A/B fixture、进程评分和注入 executor 的产物 |
 
 当一个包获得产品约定和产品消费方时，它会移出 `test-support/`。
 

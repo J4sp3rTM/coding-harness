@@ -13,6 +13,7 @@
     { "path": "../../settings/settings" },
     { "path": "../workflow" },
     { "path": "../tool-workflow" },
-    { "path": "../../runtime-diagnostics/invariants" }
+    { "path": "../../runtime-diagnostics/invariants" },
+    { "path": "../../test-support/harness-eval" }
   ]
 }
