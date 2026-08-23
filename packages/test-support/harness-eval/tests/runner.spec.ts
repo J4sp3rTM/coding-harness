@@ -40,7 +40,7 @@ describe('A/B evaluation paths', () => {
   it('reports ordered progress phases for each run', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-harness-eval-progress-'))
     try {
-      const phases = []
+      const phases: string[] = []
       await runAbEval({
         outDir: join(root, 'results'),
         fixtures: [FIXTURES[0]!],

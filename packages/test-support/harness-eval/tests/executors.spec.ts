@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { EvalExecutorInput } from '../src/runner.ts'
 import {
   createCodexVsHarnessExecutor,
   codexConfigText,
@@ -107,8 +108,8 @@ describe('real evaluation adapters', () => {
     vi.stubEnv('OPENROUTER_API_KEY', '')
     const cwd = await workspace('mapping')
     const executor = createCodexVsHarnessExecutor({}, { harnessHome: await workspace('mapping-home') })
-    const input = { fixture: { id: 'tiny-localized', task: 'noop', root: cwd, validation: { command: 'node', args: [] }, units: [] }, repetition: 0, sequence: 1, workdir: cwd } as const
-    const a = await executor({ ...input, variant: 'A' })
+    const input: EvalExecutorInput = { fixture: { id: 'tiny-localized', suite: 'baseline', task: 'noop', root: cwd, validation: { command: 'node', args: [] }, units: [] }, repetition: 0, sequence: 1, workdir: cwd, variant: 'A' }
+    const a = await executor(input)
     const b = await executor({ ...input, variant: 'B', sequence: 2 })
     expect(a?.executor).toBe('codex')
     expect(b?.executor).toBe('deepseek-harness')
