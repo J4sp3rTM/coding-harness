@@ -7,11 +7,17 @@ import {
 } from './executors.ts'
 import { runAbEval, type AbEvalProgress } from './runner.ts'
 import { FIXTURES } from './fixtures.ts'
+import { runBlindReviews } from './reviewers.ts'
 import type { FixtureSuite } from './types.ts'
 
 const SUITES = new Set<FixtureSuite | 'all'>(['baseline', 'medium', 'difficult', 'stress', 'all'])
 
-/** Render one concise progress line for an interactive CLI run. */
+/**
+ * Render one concise progress line for an interactive CLI run.
+ * @param progress Current evaluation progress event.
+ * @param live Whether executor names should be shown for live variants.
+ * @returns One terminal-friendly progress line.
+ */
 export function formatProgress(progress: AbEvalProgress, live: boolean): string {
   const side = live
     ? progress.variant === 'A' ? 'A/Codex' : 'B/DeepSeek Harness'
@@ -23,10 +29,16 @@ export function formatProgress(progress: AbEvalProgress, live: boolean): string 
   if (progress.phase === 'executor-started') return `${prefix} · agent running`
   if (progress.phase === 'executor-completed') return `${prefix} · agent ${progress.executorOutcome ?? 'finished'} (${elapsed})`
   if (progress.phase === 'validation-started') return `${prefix} · validation running`
+  if (progress.phase === 'review-started') return `${prefix} · blind reviewers running`
+  if (progress.phase === 'review-completed') return `${prefix} · blind reviews completed`
   return `${prefix} · ${progress.validationStatus ?? 'inconclusive'} (${elapsed})`
 }
 
-/** Parse command-line options and write a comparison artifact. */
+/**
+ * Parse command-line options and write comparison artifacts.
+ * @param argv Command-line arguments without the Node executable and script path.
+ * @returns Process exit code for the CLI invocation.
+ */
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const parsed = parseArgs({
     args: argv,
@@ -36,12 +48,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       live: { type: 'boolean', default: false },
       repetitions: { type: 'string', default: '1' },
       concurrency: { type: 'string', default: '1' },
+      'stall-timeout-seconds': { type: 'string', default: '600' },
+      'max-run-seconds': { type: 'string', default: '1800' },
+      resume: { type: 'boolean', default: false },
+      'redo-failed': { type: 'boolean', default: false },
       suite: { type: 'string', default: 'baseline' },
     },
   })
   const outDir = parsed.values.out
   if (outDir === undefined || outDir.length === 0) {
-    process.stderr.write('usage: harness-eval --out <dir> [--oracle | --live] [--repetitions N] [--concurrency N] [--suite baseline|medium|difficult|stress|all]\n')
+    process.stderr.write('usage: harness-eval --out <dir> [--oracle | --live] [--repetitions N] [--concurrency N] [--stall-timeout-seconds N] [--max-run-seconds N] [--resume [--redo-failed]] [--suite baseline|medium|difficult|stress|all]\n')
     return 2
   }
   if (parsed.values.oracle && parsed.values.live) {
@@ -58,6 +74,22 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.stderr.write('concurrency must be a positive integer\n')
     return 2
   }
+  const stallTimeoutSeconds = Number(parsed.values['stall-timeout-seconds'])
+  if (!Number.isSafeInteger(stallTimeoutSeconds) || stallTimeoutSeconds < 1) {
+    process.stderr.write('stall-timeout-seconds must be a positive integer\n')
+    return 2
+  }
+  const stallTimeoutMs = stallTimeoutSeconds * 1_000
+  if (parsed.values['redo-failed'] && !parsed.values.resume) {
+    process.stderr.write('--redo-failed requires --resume\n')
+    return 2
+  }
+  const maxRunSeconds = Number(parsed.values['max-run-seconds'])
+  if (!Number.isSafeInteger(maxRunSeconds) || maxRunSeconds < 1) {
+    process.stderr.write('max-run-seconds must be a positive integer\n')
+    return 2
+  }
+  const maxRunMs = maxRunSeconds * 1_000
   const live = parsed.values.live
   const suite = parsed.values.suite
   if (!SUITES.has(suite as FixtureSuite | 'all')) {
@@ -71,10 +103,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     concurrency,
     fixtures,
     applyOracle: parsed.values.oracle,
+    resume: parsed.values.resume,
+    redoFailed: parsed.values['redo-failed'],
     onProgress: (progress) => { process.stderr.write(`${formatProgress(progress, live)}\n`) },
     ...live
       ? {
-        executor: createCodexVsHarnessExecutor(),
+        executor: createCodexVsHarnessExecutor({ stallTimeoutMs, wallTimeoutMs: maxRunMs }, { stallTimeoutMs, wallTimeoutMs: maxRunMs }),
+        reviewer: runBlindReviews,
         executorMetadata: {
           id: 'codex-vs-deepseek-harness',
           version: '1',
@@ -92,7 +127,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     runs: comparison.runs.length,
     skipped: comparison.runs.filter(run => run.skipReason !== null).length,
     concurrency,
+    stallTimeoutSeconds,
+    maxRunSeconds,
+    resume: parsed.values.resume,
+    redoFailed: parsed.values['redo-failed'],
     outDir,
+    report: `${outDir}/report.html`,
   }, null, 2)}\n`)
   return 0
 }

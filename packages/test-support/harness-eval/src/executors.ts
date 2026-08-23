@@ -28,7 +28,10 @@ export const OX_ALPHA_REASONING_EFFORT = 'high'
 /** OpenRouter endpoint used by the Codex custom provider. */
 export const OPENROUTER_RESPONSES_URL = 'https://openrouter.ai/api/v1'
 
-/** Render the non-secret Codex configuration used by every live evaluation. */
+/**
+ * Render the non-secret Codex configuration used by every live evaluation.
+ * @returns Codex TOML configuration with the shared model and provider.
+ */
 export function codexConfigText(): string {
   return [
     `model = ${JSON.stringify(OX_ALPHA_MODEL)}`,
@@ -62,8 +65,13 @@ export interface ExecutorRequest {
   readonly cwd: string
   /** Directory receiving non-secret stdout/stderr evidence. */
   readonly evidenceDir: string
-  /** Maximum wall-clock duration for the model process. */
-  readonly timeoutMs?: number
+  /** Maximum silence before the model process is treated as stalled. */
+  readonly stallTimeoutMs?: number
+  /**
+   * Maximum wall-clock time for one executor run regardless of stream
+   * activity; keeps chatty-but-progressless runs from blocking the schedule.
+   */
+  readonly wallTimeoutMs?: number
 }
 
 /** Process facts retained for the evaluator and its report. */
@@ -104,6 +112,8 @@ export interface ExecutorResult {
   readonly filesChanged: string[]
   readonly stdoutPath: string | null
   readonly stderrPath: string | null
+  /** Fingerprint of the model-facing prompt inputs this run executed under. */
+  readonly promptFingerprint: string | null
 }
 
 /** Codex adapter settings. Values are test-only and do not affect user config. */
@@ -114,6 +124,10 @@ export interface CodexExecutorOptions {
   readonly command?: string
   /** Override the app-server argv for a hermetic test. */
   readonly args?: string[]
+  /** Maximum app-server silence before controlled cancellation. */
+  readonly stallTimeoutMs?: number
+  /** Maximum wall-clock time for one run regardless of stream activity. */
+  readonly wallTimeoutMs?: number
 }
 
 /** DeepSeek Harness adapter settings. */
@@ -126,6 +140,10 @@ export interface DeepSeekHarnessExecutorOptions {
   readonly args?: string[]
   /** Explicit profile name recorded in the result. */
   readonly presetId?: string
+  /** Maximum CLI silence before controlled cancellation. */
+  readonly stallTimeoutMs?: number
+  /** Maximum wall-clock time for one run regardless of stream activity. */
+  readonly wallTimeoutMs?: number
 }
 
 /** Resolved launch details used for tests and diagnostics without exposing secrets. */
@@ -209,10 +227,65 @@ interface ProcessLaunch {
   readonly args: string[]
   readonly cwd: string
   readonly env?: Record<string, string | undefined>
-  readonly timeoutMs: number
+  readonly stallTimeoutMs: number
+  readonly wallTimeoutMs?: number
 }
 
-const DEFAULT_TIMEOUT_MS = 180_000
+const DEFAULT_STALL_TIMEOUT_MS = 600_000
+/** Wall-clock cap for one executor run; chatty-but-progressless runs still end. */
+const DEFAULT_WALL_TIMEOUT_MS = 1_800_000
+
+/** Resettable abort signal used to stop only inactive executor processes. */
+export interface InactivityWatchdog {
+  readonly signal: AbortSignal
+  touch(): void
+  dispose(): void
+}
+
+/**
+ * Create an inactivity watchdog whose deadline resets on every touch.
+ * @param timeoutMs Inactivity duration that aborts the watchdog.
+ * @param message Error message attached to an inactivity abort.
+ * @returns A resettable signal and its lifecycle controls.
+ */
+export function createInactivityWatchdog(timeoutMs: number, message: string): InactivityWatchdog {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new TypeError('harness-eval: stall timeout must be a positive integer')
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const touch = (): void => {
+    clearTimeout(timer)
+    timer = setTimeout(() => { controller.abort(new Error(message)) }, timeoutMs)
+  }
+  touch()
+  return {
+    signal: controller.signal,
+    touch,
+    dispose() { clearTimeout(timer) },
+  }
+}
+
+/** One-shot deadline that aborts after `timeoutMs` regardless of stream activity. */
+export interface DeadlineSignal {
+  readonly signal: AbortSignal
+  dispose(): void
+}
+
+/**
+ * Create a wall-clock deadline signal. Unlike the inactivity watchdog it does
+ * not reset, so chatty-but-progressless runs still terminate.
+ * @param timeoutMs Wall-clock duration that aborts the deadline.
+ * @param message Error message attached to a deadline abort.
+ * @returns The deadline signal and its lifecycle controls.
+ */
+export function createDeadlineSignal(timeoutMs: number, message: string): DeadlineSignal {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new TypeError('harness-eval: wall timeout must be a positive integer')
+  const controller = new AbortController()
+  const timer = setTimeout(() => { controller.abort(new Error(message)) }, timeoutMs)
+  return {
+    signal: controller.signal,
+    dispose() { clearTimeout(timer) },
+  }
+}
 
 function stringError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -298,6 +371,7 @@ function baseResult(executor: ExecutorResult['executor'], startedAt: Date, ended
     filesChanged: [],
     stdoutPath: null,
     stderrPath: null,
+    promptFingerprint: null,
     ...fields,
   }
 }
@@ -326,41 +400,46 @@ async function withLocalSubprocess<T>(run: (runtime: SubprocessRuntime) => Promi
 
 async function runProcess(launch: ProcessLaunch): Promise<ExecutorProcessFacts> {
   return withLocalSubprocess(async (runtime) => {
-    const timeout = new AbortController()
-    const timer = setTimeout(() => {
-      timeout.abort(new Error('evaluation process timed out'))
-    }, launch.timeoutMs)
-    const collect = { maxBytes: 8 * 1024 * 1024 }
+    const watchdog = createInactivityWatchdog(launch.stallTimeoutMs, 'evaluation process produced no output before the stall timeout')
+    const deadline = launch.wallTimeoutMs === undefined
+      ? null
+      : createDeadlineSignal(launch.wallTimeoutMs, 'evaluation process exceeded the wall-clock run cap')
+    const runSignal = deadline === null ? watchdog.signal : AbortSignal.any([watchdog.signal, deadline.signal])
     const child = runtime.spawn({
       argv: [launch.command, ...launch.args],
       cwd: launch.cwd,
       env: { FORCE_COLOR: '0', ...launch.env },
       graceMs: 3_000,
-      signal: timeout.signal,
-      stdio: { stdin: 'ignore', stdout: collect, stderr: collect },
+      signal: runSignal,
+      stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
     })
+    let stdout = ''
+    let stderr = ''
+    child.stdout?.on('data', (chunk) => { stdout += String(chunk); watchdog.touch() })
+    child.stderr?.on('data', (chunk) => { stderr += String(chunk); watchdog.touch() })
     try {
       const outcome = await child.done
       await child.waitForExit()
       return {
         exitCode: outcome.exitCode,
         signal: outcome.signal,
-        timedOut: timeout.signal.aborted,
+        timedOut: runSignal.aborted,
         cancelled: false,
-        stdout: child.collected.stdout?.readFrom(0).text ?? '',
-        stderr: child.collected.stderr?.readFrom(0).text ?? '',
+        stdout,
+        stderr,
       }
     } catch (error: unknown) {
       return {
         exitCode: null,
         signal: null,
-        timedOut: timeout.signal.aborted,
+        timedOut: runSignal.aborted,
         cancelled: false,
-        stdout: child.collected.stdout?.readFrom(0).text ?? '',
-        stderr: `${child.collected.stderr?.readFrom(0).text ?? ''}${stringError(error)}`,
+        stdout,
+        stderr: `${stderr}${stringError(error)}`,
       }
     } finally {
-      clearTimeout(timer)
+      watchdog.dispose()
+      deadline?.dispose()
     }
   })
 }
@@ -452,7 +531,12 @@ async function writeHarnessLaunchPatch(
   }
 }
 
-/** Build a Harness launch and temporary composition without starting a model. */
+/**
+ * Build a Harness launch and temporary composition without starting a model.
+ * @param repositoryRoot Repository containing the Harness packages and presets.
+ * @param oauthPath Optional OpenRouter OAuth credential file.
+ * @returns Launch command, arguments, and temporary patch metadata.
+ */
 export async function createDeepSeekHarnessLaunch(
   repositoryRoot?: string,
   oauthPath?: string,
@@ -485,6 +569,7 @@ export async function runCodexExecutor(request: ExecutorRequest, options: CodexE
       const argv = await resolveCodexExecutorArgv(options)
       const command = argv[0]
       if (command === undefined) throw new Error('harness-eval: Codex command resolved to an empty argv')
+      const promptFingerprint = `codex/${createHash('sha256').update(codexConfigText()).update(command).digest('hex').slice(0, 16)}`
       const child = runtime.spawn({
         argv: [command, ...argv.slice(1)],
         cwd: request.cwd,
@@ -497,11 +582,21 @@ export async function runCodexExecutor(request: ExecutorRequest, options: CodexE
         throw new Error('harness-eval: Codex app-server did not expose piped stdio')
       }
       const wire = new CodexAppServerWire(child.stdout, child.stdin)
+      const watchdog = createInactivityWatchdog(
+        request.stallTimeoutMs ?? options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS,
+        'Codex evaluation produced no app-server activity before the stall timeout',
+      )
+      const deadline = createDeadlineSignal(
+        request.wallTimeoutMs ?? options.wallTimeoutMs ?? DEFAULT_WALL_TIMEOUT_MS,
+        'Codex evaluation exceeded the wall-clock run cap',
+      )
+      const runSignal = AbortSignal.any([watchdog.signal, deadline.signal])
       let stderr = ''
-      child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+      child.stdout.on('data', () => { watchdog.touch() })
+      child.stderr?.on('data', (chunk) => { stderr += String(chunk); watchdog.touch() })
       const processDone: Promise<ExecutorProcessFacts> = child.done.then(
-        outcome => ({ exitCode: outcome.exitCode, signal: outcome.signal, timedOut: false, cancelled: false, stdout: '', stderr }),
-        (error: unknown) => ({ exitCode: null, signal: null, timedOut: false, cancelled: false, stdout: '', stderr: `${stderr}${stringError(error)}` }),
+        outcome => ({ exitCode: outcome.exitCode, signal: outcome.signal, timedOut: runSignal.aborted, cancelled: false, stdout: '', stderr }),
+        (error: unknown) => ({ exitCode: null, signal: null, timedOut: runSignal.aborted, cancelled: false, stdout: '', stderr: `${stderr}${stringError(error)}` }),
       )
       let disposal: Promise<{ facts: ExecutorProcessFacts; durationMs: number }> | undefined
       const disposeChild = (): Promise<{ facts: ExecutorProcessFacts; durationMs: number }> => {
@@ -523,19 +618,15 @@ export async function runCodexExecutor(request: ExecutorRequest, options: CodexE
         })()
         return disposal
       }
-      const controller = new AbortController()
-      const timeoutTimer = setTimeout(() => {
-        controller.abort(new Error('Codex evaluation timed out'))
-      }, request.timeoutMs ?? DEFAULT_TIMEOUT_MS)
       let startupMs: number | null = null
       let agentStartedAt: number | null = null
       try {
         wire.start()
-        await wire.initialize(controller.signal)
-        await wire.startThread(request.cwd, controller.signal)
+        await wire.initialize(runSignal)
+        await wire.startThread(request.cwd, runSignal)
         startupMs = Date.now() - startedAt.getTime()
         agentStartedAt = Date.now()
-        const result = await wire.runTurn([request.task], controller.signal)
+        const result = await wire.runTurn([request.task], runSignal)
         const endedAt = new Date()
         const agentMs = Date.now() - agentStartedAt
         const disposalResult = await disposeChild()
@@ -548,6 +639,7 @@ export async function runCodexExecutor(request: ExecutorRequest, options: CodexE
           finalText: outputText(result.output),
           filesChanged: await changedFiles(before, request.cwd),
           process: processFacts,
+          promptFingerprint,
           timing: {
             totalMs: endedAt.getTime() - startedAt.getTime(),
             startupMs,
@@ -564,9 +656,10 @@ export async function runCodexExecutor(request: ExecutorRequest, options: CodexE
         const evidence = await saveEvidence(request, processFacts)
         return baseResult('codex', startedAt, endedAt, {
           provider: 'openrouter-eval',
-          status: 'failed',
+          status: runSignal.aborted ? 'inconclusive' : 'failed',
           stopReason: stringError(error),
           process: processFacts,
+          promptFingerprint,
           timing: {
             totalMs: endedAt.getTime() - startedAt.getTime(),
             startupMs,
@@ -577,7 +670,8 @@ export async function runCodexExecutor(request: ExecutorRequest, options: CodexE
           filesChanged: await changedFiles(before, request.cwd),
         })
       } finally {
-        clearTimeout(timeoutTimer)
+        watchdog.dispose()
+        deadline.dispose()
         await disposeChild()
       }
     })
@@ -611,13 +705,15 @@ export async function runDeepSeekHarnessExecutor(
   const repository = resolve(fileURLToPath(new URL('../../../../', import.meta.url)))
   const runHome = await mkdtemp(join(tmpdir(), 'dsh-harness-eval-home-'))
   const launch = await createDeepSeekHarnessLaunch(repository, oauthStore)
+  const promptFingerprint = `harness-code-preset/${createHash('sha256').update(await readFile(launch.presetComposition, 'utf8')).digest('hex').slice(0, 16)}`
   const args = [...(options.args ?? launch.args), request.task]
   try {
     const processFacts = await runProcess({
       command: options.command ?? launch.command,
       args,
       cwd: request.cwd,
-      timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      stallTimeoutMs: request.stallTimeoutMs ?? options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS,
+      wallTimeoutMs: request.wallTimeoutMs ?? options.wallTimeoutMs ?? DEFAULT_WALL_TIMEOUT_MS,
       env: {
         ...launch.env,
         DSH_HOME: runHome,
@@ -632,6 +728,7 @@ export async function runDeepSeekHarnessExecutor(
       stopReason: processFacts.exitCode === 0 ? 'completed' : `process exited ${String(processFacts.exitCode)}`,
       finalText: processFacts.stdout,
       process: processFacts,
+      promptFingerprint,
       filesChanged: await changedFiles(before, request.cwd),
       ...evidence,
     })
@@ -656,6 +753,7 @@ function toEvalResult(result: ExecutorResult): EvalExecutorResult {
     usage: result.usage,
     cost: result.cost,
     filesChanged: result.filesChanged,
+    promptFingerprint: result.promptFingerprint,
     ...(result.process === null ? {} : { process: result.process }),
     ...(result.status === 'skipped' ? { skipped: { reason: result.skipReason ?? 'executor skipped without a reason' } } : {}),
     executorEvidence: {
@@ -665,21 +763,33 @@ function toEvalResult(result: ExecutorResult): EvalExecutorResult {
   }
 }
 
-/** Adapt the Codex implementation to the generic A/B runner seam. */
+/**
+ * Adapt the Codex implementation to the generic A/B runner seam.
+ * @param options Optional executable, credential, and inactivity settings.
+ * @returns Codex executor for the generic evaluation runner.
+ */
 export function createCodexExecutor(options: CodexExecutorOptions = {}): EvalExecutor {
   return async (input: EvalExecutorInput): Promise<EvalExecutorResult> => toEvalResult(await runCodexExecutor({
     task: input.fixture.task,
     cwd: input.workdir,
     evidenceDir: join(dirname(input.workdir), 'evidence', `run-${input.sequence}`),
+    ...(options.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: options.stallTimeoutMs }),
+    ...(options.wallTimeoutMs === undefined ? {} : { wallTimeoutMs: options.wallTimeoutMs }),
   }, options))
 }
 
-/** Adapt the DeepSeek Harness implementation to the generic A/B runner seam. */
+/**
+ * Adapt the DeepSeek Harness implementation to the generic A/B runner seam.
+ * @param options Optional launch, credential, and inactivity settings.
+ * @returns DeepSeek Harness executor for the generic evaluation runner.
+ */
 export function createDeepSeekHarnessExecutor(options: DeepSeekHarnessExecutorOptions = {}): EvalExecutor {
   return async (input: EvalExecutorInput): Promise<EvalExecutorResult> => toEvalResult(await runDeepSeekHarnessExecutor({
     task: input.fixture.task,
     cwd: input.workdir,
     evidenceDir: join(dirname(input.workdir), 'evidence', `run-${input.sequence}`),
+    ...(options.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: options.stallTimeoutMs }),
+    ...(options.wallTimeoutMs === undefined ? {} : { wallTimeoutMs: options.wallTimeoutMs }),
   }, options))
 }
 
@@ -688,6 +798,9 @@ export function createDeepSeekHarnessExecutor(options: DeepSeekHarnessExecutorOp
  * Variant B is DeepSeek Harness. This is intentionally separate from the two
  * single-adapter factories so a caller cannot accidentally compare two runs
  * made by the same executor.
+ * @param codexOptions Optional settings for Variant A.
+ * @param harnessOptions Optional settings for Variant B.
+ * @returns Executor that dispatches each run to its assigned variant.
  */
 export function createCodexVsHarnessExecutor(
   codexOptions: CodexExecutorOptions = {},
@@ -702,7 +815,11 @@ export function createCodexVsHarnessExecutor(
   }
 }
 
-/** Stable metadata for the comparison header and reproducible reports. */
+/**
+ * Return stable metadata for comparison headers and reproducible reports.
+ * @param executor Executor whose metadata should be described.
+ * @returns Non-secret executor, model, and evidence metadata.
+ */
 export function executorMetadata(executor: 'codex' | 'deepseek-harness'): RealExecutorMetadata {
   return {
     id: executor,

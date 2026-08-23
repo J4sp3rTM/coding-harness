@@ -20,7 +20,7 @@ async function outDir(label: string): Promise<string> {
 }
 
 function assertComparison(comparison: AbComparison, execution: AbComparison['execution']): void {
-  expect(comparison.schemaVersion).toBe(1)
+  expect(comparison.schemaVersion).toBe(2)
   expect(comparison.executor).toBeNull()
   expect(comparison.execution).toBe(execution)
   expect(comparison.runs.length).toBe(8)

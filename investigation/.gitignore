@@ -1,1 +1,5 @@
 references/**/.source-git/
+
+# Live A/B evaluation artifacts: workspaces, evidence, reviews, reports.
+ab-*/
+codex-*-evidence/

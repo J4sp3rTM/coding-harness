@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createCodexVsHarnessExecutor,
   codexConfigText,
+  createDeadlineSignal,
+  createInactivityWatchdog,
   createDeepSeekHarnessLaunch,
   runCodexExecutor,
   runDeepSeekHarnessExecutor,
@@ -17,6 +19,7 @@ afterEach(async () => {
   const { rm } = await import('node:fs/promises')
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
   vi.unstubAllEnvs()
+  vi.useRealTimers()
 })
 
 async function workspace(label: string): Promise<string> {
@@ -26,6 +29,29 @@ async function workspace(label: string): Promise<string> {
 }
 
 describe('real evaluation adapters', () => {
+  it('aborts only after a complete interval without activity', async () => {
+    vi.useFakeTimers()
+    const watchdog = createInactivityWatchdog(100, 'stalled')
+    await vi.advanceTimersByTimeAsync(80)
+    watchdog.touch()
+    await vi.advanceTimersByTimeAsync(80)
+    expect(watchdog.signal.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(21)
+    expect(watchdog.signal.aborted).toBe(true)
+    expect(watchdog.signal.reason).toMatchObject({ message: 'stalled' })
+    watchdog.dispose()
+  })
+
+  it('aborts the wall-clock deadline regardless of activity', async () => {
+    vi.useFakeTimers()
+    const deadline = createDeadlineSignal(100, 'wall cap exceeded')
+    await vi.advanceTimersByTimeAsync(101)
+    expect(deadline.signal.aborted).toBe(true)
+    expect(deadline.signal.reason).toMatchObject({ message: 'wall cap exceeded' })
+    deadline.dispose()
+    expect(() => createDeadlineSignal(0, 'invalid')).toThrow(/wall timeout must be a positive integer/)
+  })
+
   it('skips Codex without an OpenRouter key instead of inventing a result', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', '')
     const cwd = await workspace('codex-skip')

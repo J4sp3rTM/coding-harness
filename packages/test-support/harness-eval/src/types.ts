@@ -1,5 +1,5 @@
 /** Version written into every comparison artifact. */
-export const COMPARISON_SCHEMA_VERSION = 1 as const
+export const COMPARISON_SCHEMA_VERSION = 2 as const
 
 /** One of the deterministic benchmark categories. */
 export type FixtureCategory =
@@ -36,7 +36,12 @@ export interface FixtureSpec {
   suite: FixtureSuite
   task: string
   root: string
-  validation: { command: string; args: string[] }
+  validation: {
+    command: string
+    args: string[]
+    /** Seed-relative files withheld during execution and restored for validation. */
+    files?: string[]
+  }
   units: EvalWorkUnit[]
 }
 
@@ -112,6 +117,50 @@ export interface ExecutorTiming {
   teardownMs: number | null
 }
 
+/** Scored quality dimensions emitted by a blind reviewer. */
+export interface ReviewDimensions {
+  correctness: number
+  architecture: number
+  robustness: number
+  maintainability: number
+  efficiency: number
+}
+
+/** One file-specific or general reviewer finding. */
+export interface ReviewFinding {
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  file: string | null
+  description: string
+}
+
+/** Structured result from one independent blind reviewer. */
+export interface ReviewerArtifact {
+  role: 'correctness' | 'architecture'
+  status: 'completed' | 'failed'
+  provider: string
+  model: string
+  verdict: 'pass' | 'partial' | 'fail' | 'inconclusive'
+  score: number | null
+  confidence: number | null
+  dimensions: ReviewDimensions | null
+  blockingIssues: string[]
+  strengths: string[]
+  findings: ReviewFinding[]
+  error: string | null
+}
+
+/** Optional third opinion used only when blind reviewers materially disagree. */
+export interface AdjudicationArtifact {
+  triggered: boolean
+  status: 'completed' | 'failed' | 'not-needed'
+  provider: string | null
+  model: string | null
+  verdict: ReviewerArtifact['verdict'] | null
+  score: number | null
+  rationale: string | null
+  error: string | null
+}
+
 /** Routing facts supplied by a policy-specific consumer. */
 export interface RoutingArtifact {
   delegated: boolean
@@ -122,6 +171,8 @@ export interface RoutingArtifact {
 
 /** One run in a comparison artifact. */
 export interface AbRunArtifact {
+  /** 1-based position in the evaluation schedule; stable across resume. */
+  sequence: number
   variant: AbVariant
   category: FixtureCategory
   fixtureId: FixtureCategory
@@ -164,6 +215,18 @@ export interface AbRunArtifact {
   skipReason: string | null
   reviewFindings: string[]
   parentCorrections: string[]
+  /** Independent blind reviews of the completed candidate workspace. */
+  reviews: ReviewerArtifact[]
+  /** Disagreement resolution, omitted from model usage unless necessary. */
+  adjudication: AdjudicationArtifact | null
+  /** Combined objective/reviewer score from zero through one hundred. */
+  qualityScore: number | null
+  /**
+   * Fingerprint of the model-facing prompt inputs this run executed under
+   * (preset composition for the Harness side, adapter config for Codex), so
+   * prompt-state contamination of a batch is detectable in the artifact.
+   */
+  promptFingerprint: string | null
   diffCorrect: boolean | null
   regression: string | null
   routing: RoutingArtifact
