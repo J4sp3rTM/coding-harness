@@ -120,6 +120,12 @@ Each candidate traces to something observed tonight; none is fixture-specific.
 
 Deferred/rejected during this overnight run: persona engineering-discipline text (empirically rejected); evaluator A/B order randomization and unified auth paths (documented limitations).
 
+### Additional operational findings at wrap-up
+
+- `scripts/release/process.ts` spawns `pnpm` bare via `spawnSync`, which cannot resolve the `.cmd` shim on Windows (`spawnSync pnpm ENOENT`); `release:dsh` therefore cannot run on a Windows host without a shell-free executable resolution (e.g., spawning `process.execPath` with the npm-global `pnpm/bin/pnpm.cjs`). Recorded for the next release-tooling pass; the bump itself was left to the standard post-merge flow.
+- Repository rules require pull requests for `master`; the work landed on branch `overnight-harness-improvement` (commits `c0b3f46110`, `07285ec6a5`, `8bee1b8391`).
+- Repo typecheck surfaced two latent test-type errors in harness-eval specs; fixed in `8bee1b8391`.
+
 ## Final repeated comparison — ab-final (COMPLETE)
 
 All suites × 3 repetitions × concurrency 4, P0 state, frozen manifest `5f190853…`, launched 20:03, completed 23:21 under a mostly healthy pool (several Codex runs hit the wall-clock cap during degraded stretches and are recorded as inconclusive).
