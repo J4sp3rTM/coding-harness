@@ -82,14 +82,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          files=()
-          for pattern in apps/desktop/release/*.dmg apps/desktop/release/*.exe apps/desktop/release/*.AppImage; do
-            for file in $pattern; do files+=("$file"); done
-          done
+          # Glob directly into the array: installer filenames contain spaces,
+          # and iterating an unquoted pattern word-splits them mid-name.
+          files=(apps/desktop/release/*.dmg apps/desktop/release/*.exe apps/desktop/release/*.AppImage)
           if [ ${#files[@]} -eq 0 ]; then
             echo "no installer artifacts found" >&2
             exit 1
           fi
           tag="${GITHUB_REF_NAME}"
-          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "$tag" --generate-notes
+          # All three matrix jobs attach to the same release concurrently:
+          # a create that loses the race is harmless as long as the release
+          # then exists, so only a failed create AND a failed view is fatal.
+          gh release create "$tag" --title "$tag" --generate-notes >/dev/null 2>&1 || true
+          gh release view "$tag" >/dev/null 2>&1
           gh release upload "$tag" "${files[@]}" --clobber

@@ -8,6 +8,9 @@
 # simply resolves to unavailable on mac/win, where platform sandboxes apply.
 appId: ai.deepseek.harness
 productName: DeepSeek Harness
+# electron-builder derives this from the package name when unset, and the
+# scoped @deepseek-ai/dsh-desktop name is not a safe executable path on Linux.
+executableName: deepseek-harness
 
 directories:
   # `app` is the staged production closure written by scripts/stage.mjs.
