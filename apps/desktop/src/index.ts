@@ -96,6 +96,9 @@ async function bootHost(): Promise<Context> {
     profile: 'web',
     patchFiles: [join(here, '..', 'desktop.patch.yml')],
     args: [],
+    // Installed resources are immutable and Electron does not provide a CLI
+    // entry path for module HMR. User patch changes apply after restarting.
+    watchUserPatches: !app.isPackaged,
   })
   return ctx
 }

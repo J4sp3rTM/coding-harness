@@ -1,0 +1,98 @@
+# Build the desktop installers for a dsh-v* release tag and attach them to the
+# GitHub Release: unsigned macOS arm64 .dmg, Windows x64 NSIS .exe, and Linux
+# x64 .AppImage. No secrets beyond the automatic GITHUB_TOKEN; code signing and
+# notarization land when credentials exist. `workflow_dispatch` builds the same
+# matrix and keeps the installers as workflow artifacts for testing without a
+# tag.
+name: Desktop Release
+
+on:
+  push:
+    tags: ['dsh-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PRIMARY_NODE_VERSION: '24'
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64 dmg
+            os: macos-14
+            platform: mac
+          - name: Windows x64 exe
+            os: windows-latest
+            platform: win
+          - name: Linux x64 AppImage
+            os: ubuntu-24.04
+            platform: linux
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace
+        run: pnpm run build
+
+      - name: Package desktop installer
+        run: pnpm --filter @deepseek-ai/dsh-desktop run dist:${{ matrix.platform }}
+
+      # Tag builds attach to the release; dispatch builds stay workflow
+      # artifacts so a branch test never creates a stray release.
+      - name: Upload workflow artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Attach installers to release
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          # Glob directly into the array: installer filenames contain spaces,
+          # and iterating an unquoted pattern word-splits them mid-name.
+          files=(apps/desktop/release/*.dmg apps/desktop/release/*.exe apps/desktop/release/*.AppImage)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no installer artifacts found" >&2
+            exit 1
+          fi
+          tag="${GITHUB_REF_NAME}"
+          # All three matrix jobs attach to the same release concurrently:
+          # a create that loses the race is harmless as long as the release
+          # then exists, so only a failed create AND a failed view is fatal.
+          gh release create "$tag" --title "$tag" --generate-notes >/dev/null 2>&1 || true
+          gh release view "$tag" >/dev/null 2>&1
+          gh release upload "$tag" "${files[@]}" --clobber

@@ -1,0 +1,51 @@
+# Packager for the desktop shell: the composed harness Host and the web
+# client in one Electron process over the `dsh://` scheme. The packaged tree
+# is produced by `scripts/stage.mjs` (pnpm deploy of this app's production
+# closure) — everything packable lives under `staging/`.
+#
+# Native modules (node-pty, koffi) are rebuilt against Electron by
+# npmRebuild; Landlock ships linux-only prebuilds as optionalDependencies and
+# simply resolves to unavailable on mac/win, where platform sandboxes apply.
+appId: ai.deepseek.harness
+productName: DeepSeek Harness
+# electron-builder derives this from the package name when unset, and the
+# scoped @deepseek-ai/dsh-desktop name is not a safe executable path on Linux.
+executableName: deepseek-harness
+
+directories:
+  # `app` is the staged production closure written by scripts/stage.mjs.
+  app: staging
+  output: release
+  buildResources: build
+
+files:
+  - lib/index.js
+  - desktop.patch.yml
+  - node_modules/**/*
+
+# The app boots a large pnpm ESM graph with internal symlinks. Electron 38
+# stalls during ESM linking when that graph is inside asar; the same verified
+# self-contained tree boots normally from the filesystem. Keep v1 unpacked for
+# correctness; signing and size optimization can revisit asar later.
+asar: false
+
+npmRebuild: true
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64]
+  # Unsigned v1: Gatekeeper warns on first open. Signing/notarization lands
+  # when credentials exist.
+  identity: null
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+linux:
+  category: Development
+  target:
+    - appimage

@@ -38,3 +38,7 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# desktop packaging outputs
+apps/desktop/staging/
+apps/desktop/release/

@@ -1,12 +1,17 @@
 {
   "name": "@deepseek-ai/dsh-desktop",
   "description": "Desktop application: the composed harness Host and the web client in one Electron process, carried over a custom scheme with no listening socket",
-  "version": "0.1.0-rc.9",
+  "version": "0.1.0-rc.10",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "stage": "node scripts/stage.mjs",
+    "dist": "node scripts/stage.mjs && electron-builder --publish never",
+    "dist:mac": "pnpm run dist --mac",
+    "dist:win": "pnpm run dist --win",
+    "dist:linux": "pnpm run dist --linux"
   },
   "files": [
     "desktop.patch.yml",
@@ -19,12 +24,12 @@
     "@deepseek-ai/dsh": "workspace:^",
     "@deepseek-ai/dsh-app-boot": "workspace:^",
     "@deepseek-ai/dsh-host-apiproxy": "workspace:^",
-    "@deepseek-ai/dsh-host-electron-carrier": "workspace:^",
-    "@deepseek-ai/dsh-web-frontend": "workspace:^"
+    "@deepseek-ai/dsh-host-electron-carrier": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "electron": "^38.0.0",
+    "electron-builder": "^26.0.12",
     "typescript": "^6.0.3"
   }
 }
