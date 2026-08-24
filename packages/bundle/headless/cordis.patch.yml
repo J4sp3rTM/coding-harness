@@ -14,6 +14,14 @@
 - id: hmr
   disabled: true
 
+# One-shot stdout is the answer. Errors still fail loud on stderr; info
+# chatter (dormant adapter report, late subagent providers) stays off unless
+# `DSH_LOG_LEVEL` raises the floor.
+- id: logger-console
+  config:
+    levels:
+      default: !!js Number(process.env.DSH_LOG_LEVEL ?? 0)
+
 - id: tools
   config:
     # Keep the same temporary process-wide Code Mode opt-in as the Web surface.

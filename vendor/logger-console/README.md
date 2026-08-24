@@ -31,5 +31,6 @@ root.logger('app').info('started')
 | `showTime` | Timestamp template. |
 | `label` | Label width, margin, and alignment options. |
 
-The Node entry uses `node:util.inspect` for `%o` and `%O`; the browser entry
-passes log arguments through to `console`.
+The Node entry writes every record to stderr and uses `node:util.inspect`
+for `%o` and `%O`. The browser entry dispatches to the matching `console`
+method.
