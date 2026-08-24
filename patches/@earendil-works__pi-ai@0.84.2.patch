@@ -22,7 +22,7 @@ index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..d81cde3324ccc01e8ef1c1c14ab45fb5
    <meta name="viewport" content="width=device-width, initial-scale=1" />
 -  <title>${title}</title>
 +  <meta name="color-scheme" content="light dark" />
-+  <title>${title} · DeepSeek Harness</title>
++  <title>${title} · Conduit</title>
    <style>
 +    /* Palette mirrors the harness design tokens (ui-theme design-platform.css):
 +       neutral-bluish for surface and type, deepseek-500/400 as the accent,
@@ -195,7 +195,7 @@ index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..d81cde3324ccc01e8ef1c1c14ab45fb5
 -    <h1>${heading}</h1>
 -    <p>${message}</p>
 -    ${details ? `<div class="details">${details}</div>` : ""}
-+    <div class="brand">DeepSeek Harness</div>
++    <div class="brand">Conduit</div>
 +    <section class="card" aria-labelledby="auth-heading">
 +      <div class="mark">${icon}</div>
 +      <h1 id="auth-heading">${heading}</h1>

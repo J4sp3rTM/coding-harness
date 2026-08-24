@@ -6,11 +6,11 @@
 # Native modules (node-pty, koffi) are rebuilt against Electron by
 # npmRebuild; Landlock ships linux-only prebuilds as optionalDependencies and
 # simply resolves to unavailable on mac/win, where platform sandboxes apply.
-appId: ai.deepseek.harness
+appId: app.conduit.desktop
 productName: Conduit
 # electron-builder derives this from the package name when unset, and the
 # scoped @deepseek-ai/dsh-desktop name is not a safe executable path on Linux.
-executableName: deepseek-harness
+executableName: conduit
 
 directories:
   # `app` is the staged production closure written by scripts/stage.mjs.

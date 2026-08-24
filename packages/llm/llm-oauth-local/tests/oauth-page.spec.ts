@@ -18,9 +18,9 @@ describe('patched pi-ai OAuth callback page', () => {
   it('renders the Harness-branded success state and escapes provider text', async () => {
     const html = (await pages()).oauthSuccessHtml('OpenAI <ready>')
 
-    expect(html).toContain('<title>Authentication successful · DeepSeek Harness</title>')
+    expect(html).toContain('<title>Authentication successful · Conduit</title>')
     expect(html).toContain('data-state="success"')
-    expect(html).toContain('DeepSeek Harness')
+    expect(html).toContain('Conduit')
     expect(html).toContain('OpenAI &lt;ready&gt;')
     expect(html).not.toContain('OpenAI <ready>')
     expect(html).not.toContain('<script')

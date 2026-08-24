@@ -9,7 +9,7 @@ overrides:
   '@deepseek-ai/schemastery': link:vendor/schemastery
 
 patchedDependencies:
-  '@earendil-works/pi-ai@0.84.2': 265d06c8205739999240626fb02bb5cff72be0c7b9067ff3a27331fb8ebcd8e7
+  '@earendil-works/pi-ai@0.84.2': 83fff09daa7cf69461527450311322466093816632ec655ee5367f85c03bf7ca
   node-pty@1.2.0-beta.15: b40ae545608897914bd25fb009c97eeac478c34e8a910298ddcb01b746534bb0
 
 importers:
@@ -5576,7 +5576,7 @@ importers:
         version: link:../../../vendor/schemastery
       '@earendil-works/pi-ai':
         specifier: ^0.84.2
-        version: 0.84.2(patch_hash=265d06c8205739999240626fb02bb5cff72be0c7b9067ff3a27331fb8ebcd8e7)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+        version: 0.84.2(patch_hash=83fff09daa7cf69461527450311322466093816632ec655ee5367f85c03bf7ca)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -5604,7 +5604,7 @@ importers:
         version: link:../../../vendor/schemastery
       '@earendil-works/pi-ai':
         specifier: ^0.84.2
-        version: 0.84.2(patch_hash=265d06c8205739999240626fb02bb5cff72be0c7b9067ff3a27331fb8ebcd8e7)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+        version: 0.84.2(patch_hash=83fff09daa7cf69461527450311322466093816632ec655ee5367f85c03bf7ca)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -16287,7 +16287,7 @@ snapshots:
     transitivePeerDependencies:
       - '@algolia/client-search'
 
-  '@earendil-works/pi-ai@0.84.2(patch_hash=265d06c8205739999240626fb02bb5cff72be0c7b9067ff3a27331fb8ebcd8e7)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)':
+  '@earendil-works/pi-ai@0.84.2(patch_hash=83fff09daa7cf69461527450311322466093816632ec655ee5367f85c03bf7ca)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@anthropic-ai/sdk': 0.91.1(zod@4.4.3)
       '@aws-sdk/client-bedrock-runtime': 3.1048.0
