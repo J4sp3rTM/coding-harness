@@ -81,13 +81,16 @@ export interface SubagentRunEndInfo {
  * continuable children are composed by the continuation manager itself and are
  * gated by {@link SubagentProvider.prepareContinuable} instead. Each flag
  * corresponds one-to-one to a {@link SubagentStartRequest} option: `depthLimit`
- * to `maxDepth`; the other names match.
+ * to `maxDepth`; `agentOptions` covers the complete child option object; the
+ * other names match.
  */
 export interface SubagentCapabilities {
   readonly outputSchema: boolean
   readonly depthLimit: boolean
   readonly toolFilter: boolean
   readonly persona: boolean
+  /** Whether one-shot starts consume {@link SubagentStartRequest.agentOptions}. */
+  readonly agentOptions?: boolean
 }
 
 /**

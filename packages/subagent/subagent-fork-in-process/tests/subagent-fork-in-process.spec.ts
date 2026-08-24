@@ -194,9 +194,9 @@ describe('dsh-subagent-fork-in-process', () => {
     await run.dispose()
   })
 
-  it('advertises every start-time capability (depthLimit, outputSchema, toolFilter, persona)', async () => {
+  it('advertises every start-time capability (depthLimit, outputSchema, toolFilter, persona, agentOptions)', async () => {
     const { ctx } = await setup([])
-    expect(ctx.subagents.getProvider('fork')!.capabilities).toEqual({ outputSchema: true, depthLimit: true, toolFilter: true, persona: true })
+    expect(ctx.subagents.getProvider('fork')!.capabilities).toEqual({ outputSchema: true, depthLimit: true, toolFilter: true, persona: true, agentOptions: true })
   })
 
   it('unregisters the provider when its fiber is disposed (HMR safety)', async () => {

@@ -12,7 +12,7 @@ import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import type { GenerateOptions, MessageId, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { CallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { CallId, createUserMessage, LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import { MockAdapter, maxTokensResponse, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
@@ -2274,6 +2274,28 @@ describe('continuable errors', () => {
     await followup(ctx, parent, started.childId, message('again'))
     await vi.waitFor(() => {
       expect(ctx.agents.get(started.childId)?.options.model).toBe('child-model')
+    })
+    await waitNoActivation(ctx, started.childId)
+  })
+
+  it('reapplies the descriptor reasoning effort on cold resume', async () => {
+    const { ctx, parent } = await setup([textResponse('first'), textResponse('resumed')])
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      request: {
+        prompt: message('effort work'),
+        parent,
+        agentOptions: { reasoningEffort: ReasoningEffortId('max') },
+      },
+    })
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await ctx.sessionPersistence.load(started.childId)
+    expect(loaded.events.find(event => event.type === 'subagent/descriptor')?.data)
+      .toMatchObject({ agentReasoningEffort: 'max' })
+
+    await followup(ctx, parent, started.childId, message('again'))
+    await vi.waitFor(() => {
+      expect(ctx.agents.get(started.childId)?.options.reasoningEffort).toBe(ReasoningEffortId('max'))
     })
     await waitNoActivation(ctx, started.childId)
   })

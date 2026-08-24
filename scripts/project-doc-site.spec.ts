@@ -355,12 +355,12 @@ describe('docsPages locale routes', () => {
 
   it('projects reviewed generated counterparts into root locale routes', () => {
     // module-graph, event-producer-consumer, and graph-atlas are paired but intentionally unpublished.
+    // tool-catalog is English-only: no reviewed Chinese counterpart is maintained for it.
     const routes = [
       'reference/capability-seams.md',
       'reference/agent-lifecycle.md',
       'reference/tool-execution-pipeline.md',
       'reference/config-catalog.md',
-      'reference/tool-catalog.md',
       'reference/persistence-catalog.md',
       'reference/cordis-api/context.md',
       'reference/cordis-api/events.md',
@@ -371,6 +371,9 @@ describe('docsPages locale routes', () => {
     const pages = routes.map(route => docsPages.find(page => page.route === route))
     expect(pages.every(page => page?.contentLocale === 'zh-CN')).toBe(true)
     expect(pages.every(page => page?.source.endsWith('.zh.md'))).toBe(true)
+    const toolCatalog = docsPages.find(page => page.route === 'reference/tool-catalog.md')
+    expect(toolCatalog?.contentLocale).toBe('en-US')
+    expect(toolCatalog?.source).toBe('docs/tool-catalog.md')
   })
 })
 

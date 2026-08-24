@@ -100,21 +100,41 @@ describe('dsh-tool-subagent', () => {
     expect(text(result)).toBe('child says hi')
   })
 
-  it('exposes description + prompt + run_in_background to the model (no provider/type parameter)', async () => {
+  it('exposes description + prompt + run_in_background + model/effort overrides to the model (no provider/type parameter)', async () => {
     const ctx = await setup({ provider: 'mock' })
     const schema = ctx.tools.schemas().find(s => s.name === 'subagent')
     expect(schema).toBeDefined()
     const props = (schema!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
-    expect(Object.keys(props).sort()).toEqual(['description', 'prompt', 'run_in_background'])
+    expect(Object.keys(props).sort()).toEqual(['description', 'effort', 'model', 'prompt', 'run_in_background'])
     expect(schema!.description).toContain('job_output')
   })
 
-  it('omits run_in_background entirely when the instance disables it (schema and capability never disagree)', async () => {
+  it('omits run_in_background entirely when the instance disables it but keeps model/effort (schema and capability never disagree)', async () => {
     const ctx = await setup({ provider: 'mock', enableRunInBackground: false })
     const schema = ctx.tools.schemas().find(s => s.name === 'subagent')
     const props = (schema!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
-    expect(Object.keys(props).sort()).toEqual(['description', 'prompt'])
+    expect(Object.keys(props).sort()).toEqual(['description', 'effort', 'model', 'prompt'])
     expect(schema!.description).not.toContain('job_output')
+  })
+
+  it('omits and rejects overrides when a one-shot provider cannot consume agentOptions', async () => {
+    const onStart = vi.fn()
+    const ctx = await setup({ provider: 'mock' }, { capabilities: { agentOptions: false }, onStart })
+    const schema = ctx.tools.schemas().find(s => s.name === 'subagent')
+    const props = (schema!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
+    expect(Object.keys(props).sort()).toEqual(['description', 'prompt', 'run_in_background'])
+    expect(schema!.description).not.toContain('Pass `model` or `effort`')
+    const result = await callSubagent(ctx, { description: 'd', prompt: 'p', model: 'ignored' })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('does not support per-call model or effort overrides')
+    expect(onStart).not.toHaveBeenCalled()
+  })
+
+  it('rejects configured agentOptions when a one-shot provider cannot consume them', async () => {
+    await expect(setup(
+      { provider: 'mock', agentOptions: { model: 'ignored' } },
+      { capabilities: { agentOptions: false } },
+    )).rejects.toThrow('provider "mock" does not support agentOptions')
   })
 
   it('refuses a forced run_in_background at execution time when the instance disables it', async () => {
@@ -242,7 +262,7 @@ describe('dsh-tool-subagent', () => {
     await ctx.plugin(SubagentRuntime)
     ctx.subagents.registerProvider({
       name: 'capture',
-      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false, agentOptions: true },
       inheritsParentContext: false,
       start: async (request) => {
         seen = request
@@ -1235,7 +1255,7 @@ describe('depth budget configuration', () => {
     await ctx.plugin(SubagentRuntime)
     ctx.subagents.registerProvider({
       name: 'capture',
-      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true, agentOptions: true },
       inheritsParentContext: false,
       start: async (request) => {
         requests.push(request)
@@ -1305,5 +1325,104 @@ describe('depth budget configuration', () => {
     await callSubagent(ctx, { description: 'd', prompt: 'p' })
     expect(requests[0]?.maxDepth).toBeUndefined()
     expect(requests[0]?.toolFilter).toBeUndefined()
+  })
+})
+
+describe('per-call model/effort overrides', () => {
+  /** Mount the tool over a request-capturing provider with no start-time features. */
+  async function overrideSetup(config: Omit<tool.Config, 'provider'> = {}) {
+    const requests: SubagentStartRequest[] = []
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SubagentRuntime)
+    ctx.subagents.registerProvider({
+      name: 'override-capture',
+      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false, agentOptions: true },
+      inheritsParentContext: false,
+      start: async (request) => {
+        requests.push(request)
+        return {
+          id: SessionId(`override-child-${requests.length}`),
+          localAgent: undefined,
+          result: Promise.resolve({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' as const }),
+          dispose: async () => {},
+        }
+      },
+    })
+    await ctx.plugin(tool, { provider: 'override-capture', maxDepth: 'provider-managed', ...config })
+    return { ctx, requests }
+  }
+
+  it('adds no agentOptions when neither an override nor configured agent options exist', async () => {
+    // The no-override path must keep the request byte-identical to its
+    // pre-parameter shape: an added empty `agentOptions` object would change
+    // how providers resolve child options.
+    const { ctx, requests } = await overrideSetup()
+    await callSubagent(ctx, { description: 'd', prompt: 'p' })
+    expect(requests[0]).toBeDefined()
+    expect(requests[0]).not.toHaveProperty('agentOptions')
+  })
+
+  it('a model-only override creates agentOptions when the deployment has none', async () => {
+    const { ctx, requests } = await overrideSetup()
+    await callSubagent(ctx, { description: 'd', prompt: 'p', model: 'child-model' })
+    expect(requests[0]?.agentOptions).toEqual({ model: 'child-model' })
+  })
+
+  it('a model-only override replaces model and preserves the other configured fields', async () => {
+    const { ctx, requests } = await overrideSetup({ agentOptions: { model: 'config-model', maxTokens: 256 } })
+    await callSubagent(ctx, { description: 'd', prompt: 'p', model: 'child-model' })
+    expect(requests[0]?.agentOptions).toEqual({ model: 'child-model', maxTokens: 256 })
+  })
+
+  it('an effort-only override sets reasoningEffort and preserves the other configured fields', async () => {
+    const { ctx, requests } = await overrideSetup({ agentOptions: { model: 'config-model' } })
+    await callSubagent(ctx, { description: 'd', prompt: 'p', effort: 'max' })
+    expect(requests[0]?.agentOptions).toEqual({ model: 'config-model', reasoningEffort: 'max' })
+  })
+
+  it('model and effort overrides apply together over the configured defaults', async () => {
+    const { ctx, requests } = await overrideSetup({ agentOptions: { model: 'config-model', maxTokens: 128 } })
+    await callSubagent(ctx, { description: 'd', prompt: 'p', model: 'override-model', effort: 'high' })
+    expect(requests[0]?.agentOptions).toEqual({ model: 'override-model', maxTokens: 128, reasoningEffort: 'high' })
+  })
+
+  it.each([
+    { label: 'the empty string', value: '' },
+    { label: 'whitespace only', value: '   ' },
+  ])('rejects an effort override that is $label at execution time', async ({ value }) => {
+    // ReasoningEffortId is an open adapter-owned id with no static value set:
+    // the tool enforces shape, and route membership is rejected loud by the
+    // LLM runtime at request time.
+    const { ctx, requests } = await overrideSetup()
+    const result = await callSubagent(ctx, { description: 'd', prompt: 'p', effort: value })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('`effort` must be a non-empty string')
+    expect(requests).toHaveLength(0)
+  })
+
+  it.each([
+    { label: 'the empty string', value: '' },
+    { label: 'whitespace only', value: '  ' },
+  ])('rejects a model override that is $label at execution time', async ({ value }) => {
+    const { ctx, requests } = await overrideSetup()
+    const result = await callSubagent(ctx, { description: 'd', prompt: 'p', model: value })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('`model` must be a non-empty string')
+    expect(requests).toHaveLength(0)
+  })
+
+  it.each([
+    { enableRunInBackground: true },
+    { enableRunInBackground: false },
+  ])('declares both override parameters regardless of enableRunInBackground=$enableRunInBackground', async ({ enableRunInBackground }) => {
+    const ctx = await setup({ provider: 'mock', enableRunInBackground })
+    const schema = ctx.tools.schemas().find(s => s.name === 'subagent')!
+    const props = (schema.parameters as { properties: Record<string, { description?: string }> }).properties
+    expect(Object.keys(props)).toEqual(expect.arrayContaining(['model', 'effort']))
+    expect(typeof props['model']?.description).toBe('string')
+    expect(typeof props['effort']?.description).toBe('string')
+    expect(schema.description).toContain('`model` or `effort`')
   })
 })
