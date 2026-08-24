@@ -149,7 +149,11 @@ export class ElectronWebServer extends Service {
     return this.indexTaps.reduce((current, transform) => transform(current), html)
   }
 
-  /** Whether any upgrade route claims this path (diagnostics only). */
+  /**
+   * Whether any upgrade route claims this path (diagnostics only).
+   * @param path - pathname to probe.
+   * @returns true when an upgrade route is registered for the path.
+   */
   hasUpgrade(path: string): boolean {
     return this.upgrades.has(path)
   }

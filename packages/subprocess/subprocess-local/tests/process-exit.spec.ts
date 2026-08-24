@@ -30,7 +30,12 @@ function processExists(pid: number): boolean {
 async function readTree(path: string): Promise<TreeState> {
   return vi.waitFor(async () => {
     const text = await readFile(path, 'utf8')
-    const state = JSON.parse(text) as Partial<TreeState>
+    let state: Partial<TreeState>
+    try {
+      state = JSON.parse(text) as Partial<TreeState>
+    } catch {
+      throw new Error(`managed-tree state is not complete JSON yet: ${text}`)
+    }
     if (!Number.isSafeInteger(state.root) || !Number.isSafeInteger(state.descendant)
       || (state.root ?? 0) <= 0 || (state.descendant ?? 0) <= 0 || state.root === state.descendant) {
       throw new Error(`invalid managed-tree state: ${text}`)
