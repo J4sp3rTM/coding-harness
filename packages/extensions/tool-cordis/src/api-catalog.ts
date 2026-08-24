@@ -2107,8 +2107,8 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'webServer',
-    summary: 'The browser HTTP carrier service.',
-    description: 'The browser HTTP carrier service. Activation listens immediately. Route registration order does not affect requests because configured named routes must be distinct, and the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A listen failure rejects initialization, and the boot process reports the failed fiber.',
+    summary: 'The Electron carrier\'s route table.',
+    description: 'The Electron carrier\'s route table.\n\nMirrors `@deepseek-ai/dsh-host-webserver`\'s service surface — same method names, same duplicate-registration rules — so composition rows cannot tell the two apart. `port`/`host` report the in-process facts: there is no socket, and callers that print a URL should be configured not to.',
     methods: [
       {
         signature: 'register(route: WebRoute): () => void',
@@ -2118,27 +2118,39 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'registerUpgrade(route: WebUpgradeRoute): () => void',
-        description: 'Register an exact-path HTTP upgrade route. Duplicate paths throw because one socket can have only one protocol owner.',
-        parameters: [{ name: 'route', description: 'pathname and handler owning negotiation plus socket use.' }],
+        description: 'Accept an upgrade registration for contract parity. A custom scheme cannot upgrade, so nothing dispatches here; the registration is recorded only so the registering row mounts and disposes normally.',
+        parameters: [{ name: 'route', description: 'pathname and handler.' }],
         returns: 'the disposer removing the route.',
       },
       {
         signature: 'registerFallback(handler: WebRoute[\'handler\']): () => void',
-        description: 'Claim the fallback seat: the handler answering every request no named route matches (the SPA dist server in the shipped Web composition). One owner only — a second registration throws, because two fallbacks cannot compose.',
+        description: 'Claim the fallback seat: the handler answering every request no named route matches (the SPA dist server).',
         parameters: [{ name: 'handler', description: 'owns the full response lifecycle of unmatched requests.' }],
         returns: 'the disposer releasing the seat.',
       },
       {
         signature: 'tapIndex(transform: (html: string) => string): () => void',
-        description: 'Register an index.html transform, applied by the fallback owner to every index response (applyIndexTaps) in registration order.',
+        description: 'Register an index.html transform, applied by the fallback owner in registration order.',
         parameters: [{ name: 'transform', description: 'pure html-to-html function.' }],
         returns: 'the disposer removing the transform.',
       },
       {
         signature: 'applyIndexTaps(html: string): string',
-        description: 'Run an index.html body through the registered taps in registration order — called by the fallback owner on every index response it renders.',
-        parameters: [{ name: 'html', description: 'the raw index.html body.' }],
-        returns: 'the transformed body.',
+        description: 'Apply the registered index transforms, in registration order.',
+        parameters: [{ name: 'html', description: 'the index document.' }],
+        returns: 'the transformed document.',
+      },
+      {
+        signature: 'hasUpgrade(path: string): boolean',
+        description: 'Whether any upgrade route claims this path (diagnostics only).',
+        parameters: [{ name: 'path', description: 'pathname to probe.' }],
+        returns: 'true when an upgrade route is registered for the path.',
+      },
+      {
+        signature: 'async handle(request: Request): Promise<Response>',
+        description: 'Answer one protocol request through the route table.\n\nThis is the carrier\'s whole entry point: the desktop shell hands it every request on the app scheme and returns what it resolves.',
+        parameters: [{ name: 'request', description: 'the fetch request from the protocol handler.' }],
+        returns: 'the response, once the owning route commits its status line.',
       },
     ],
   },
@@ -2630,7 +2642,7 @@ export const EVENT_API: readonly EventApiEntry[] = [
     signature: '\'workflow/agent-start\'(info: WorkflowRunInfo, agent: WorkflowAgentInfo): void',
     summary: 'One `agent()` call established a published child run.',
     description: 'One `agent()` call established a published child run. Paired with Events[\'workflow/agent-end\'] by `agent.seq`. A call that never receives a published run from the provider emits neither event in this pair.',
-    parameters: [{ name: 'info', description: 'the run\'s identity snapshot.' }, { name: 'agent', description: 'the call\'s sequence number, label, phase, and child id.' }],
+    parameters: [{ name: 'info', description: 'the run\'s identity snapshot.' }, { name: 'agent', description: 'the call\'s sequence number, label, phase, child id, and optional provider/model/effort route.' }],
   },
   {
     name: 'workflow/end',
@@ -2690,7 +2702,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AgentOptions',
-    declaration: 'export interface AgentOptions {\n    provider?: string;\n    model?: string;\n    maxTokens?: number;\n}',
+    declaration: 'export interface AgentOptions {\n    provider?: string;\n    model?: string;\n    reasoningEffort?: ReasoningEffortId;\n    maxTokens?: number;\n}',
   },
   {
     name: 'AgentPreset',
@@ -3817,10 +3829,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SearchResultView = SearchMatchesResultView | SearchPathsResultView;',
   },
   {
-    name: 'ServerResponse',
-    declaration: 'export interface ServerResponse {\n    type: \'server-response\';\n    rpcId: RpcId;\n    result: RpcResult<unknown>;\n}',
-  },
-  {
     name: 'SessionAvailability',
     declaration: 'export type SessionAvailability = \'live\' | \'persisted\';',
   },
@@ -4661,14 +4669,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type WebResultView = WebSearchResultView | WebFetchResultView;',
   },
   {
-    name: 'WebRoute',
-    declaration: 'export interface WebRoute {\n    kind: WebRouteKind;\n    path: string;\n    handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;\n}',
-  },
-  {
-    name: 'WebRouteKind',
-    declaration: 'export type WebRouteKind = \'exact\' | \'prefix\';',
-  },
-  {
     name: 'WebSearchProvider',
     declaration: 'export interface WebSearchProvider {\n    readonly id: string;\n    available(): boolean;\n    search(request: WebSearchRequest, signal?: AbortSignal): Promise<WebSearchResult>;\n}',
   },
@@ -4693,20 +4693,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface WebSource {\n    url: string;\n    title?: string;\n    snippet?: string;\n    publishedAt?: string;\n}',
   },
   {
-    name: 'WebUpgradeRoute',
-    declaration: 'export interface WebUpgradeRoute {\n    path: string;\n    handler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>;\n}',
-  },
-  {
     name: 'WorkflowAgentEndInfo',
     declaration: 'export interface WorkflowAgentEndInfo extends WorkflowAgentInfo {\n    outcome: WorkflowAgentOutcome;\n}',
   },
   {
     name: 'WorkflowAgentInfo',
-    declaration: 'export interface WorkflowAgentInfo {\n    seq: number;\n    label: string;\n    phase?: string;\n    childId: SessionId;\n}',
+    declaration: 'export interface WorkflowAgentInfo {\n    seq: number;\n    label: string;\n    phase?: string;\n    childId: SessionId;\n    provider?: string;\n    model?: string;\n    effort?: string;\n    effortSource?: WorkflowEffortSource;\n}',
   },
   {
     name: 'WorkflowAgentOutcome',
     declaration: 'export type WorkflowAgentOutcome = \'completed\' | \'failed\' | \'cancelled\';',
+  },
+  {
+    name: 'WorkflowEffortSource',
+    declaration: 'export type WorkflowEffortSource = \'configured\' | \'provider-default\';',
   },
   {
     name: 'WorkflowMeta',

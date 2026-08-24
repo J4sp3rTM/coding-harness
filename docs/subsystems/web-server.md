@@ -54,11 +54,13 @@ A request whose handling throws (a malformed %-escape hitting `decodeURIComponen
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — this section is byte-identical in both language sides of the page. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
-<a id="ctxwebserver--webserver"></a>
+<a id="ctxwebserver--electronwebserver"></a>
 
-### `ctx.webServer` — `WebServer`
+### `ctx.webServer` — `ElectronWebServer`
 
-The browser HTTP carrier service. Activation listens immediately. Route registration order does not affect requests because configured named routes must be distinct, and the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A listen failure rejects initialization, and the boot process reports the failed fiber.
+The Electron carrier's route table.
+
+Mirrors `@deepseek-ai/dsh-host-webserver`'s service surface — same method names, same duplicate-registration rules — so composition rows cannot tell the two apart. `port`/`host` report the in-process facts: there is no socket, and callers that print a URL should be configured not to.
 
 ```ts cordis-catalog
 /**
@@ -70,39 +72,54 @@ The browser HTTP carrier service. Activation listens immediately. Route registra
 register(route: WebRoute): () => void
 
 /**
- * Register an exact-path HTTP upgrade route. Duplicate paths throw because
- * one socket can have only one protocol owner.
- * @param route - pathname and handler owning negotiation plus socket use.
+ * Accept an upgrade registration for contract parity. A custom scheme cannot
+ * upgrade, so nothing dispatches here; the registration is recorded only so
+ * the registering row mounts and disposes normally.
+ * @param route - pathname and handler.
  * @returns the disposer removing the route.
  */
 registerUpgrade(route: WebUpgradeRoute): () => void
 
 /**
  * Claim the fallback seat: the handler answering every request no named
- * route matches (the SPA dist server in the shipped Web composition). One
- * owner only — a second registration throws, because two fallbacks cannot
- * compose.
+ * route matches (the SPA dist server).
  * @param handler - owns the full response lifecycle of unmatched requests.
  * @returns the disposer releasing the seat.
  */
 registerFallback(handler: WebRoute['handler']): () => void
 
 /**
- * Register an index.html transform, applied by the fallback owner to every
- * index response ({@link applyIndexTaps}) in registration order.
+ * Register an index.html transform, applied by the fallback owner in
+ * registration order.
  * @param transform - pure html-to-html function.
  * @returns the disposer removing the transform.
  */
 tapIndex(transform: (html: string) => string): () => void
 
 /**
- * Run an index.html body through the registered taps in registration order
- * — called by the fallback owner on every index response it renders.
- * @param html - the raw index.html body.
- * @returns the transformed body.
+ * Apply the registered index transforms, in registration order.
+ * @param html - the index document.
+ * @returns the transformed document.
  */
 applyIndexTaps(html: string): string
+
+/**
+ * Whether any upgrade route claims this path (diagnostics only).
+ * @param path - pathname to probe.
+ * @returns true when an upgrade route is registered for the path.
+ */
+hasUpgrade(path: string): boolean
+
+/**
+ * Answer one protocol request through the route table.
+ *
+ * This is the carrier's whole entry point: the desktop shell hands it every
+ * request on the app scheme and returns what it resolves.
+ * @param request - the fetch request from the protocol handler.
+ * @returns the response, once the owning route commits its status line.
+ */
+async handle(request: Request): Promise<Response>
 ```
 
-Source: [`packages/host/webserver/src/index.ts:59`](../../packages/host/webserver/src/index.ts)
+Source: [`packages/host/electron-carrier/src/index.ts:61`](../../packages/host/electron-carrier/src/index.ts)
 <!-- END GENERATED cordis-surface -->
