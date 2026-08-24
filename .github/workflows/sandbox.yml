@@ -1,15 +1,19 @@
 # Sandbox CI: the keyless real-kernel confinement proofs. This master-only
-# reference stays outside the pull-request verdict; rationale lives in
-# .agents/notes/implemented/process/2026-07-21-serial-cross-platform-ci-reference.md.
-# A separate workflow from ci.yml because the axis is different — these jobs
-# fan out over OS×runner (kernel capabilities), not node versions. The Landlock
-# launcher is built from native/landlock-run on each Landlock leg and installed
-# from the same tarballs the main-repository release workflow publishes.
+# reference stays outside the pull-request verdict. A separate workflow from
+# ci.yml because the axis is different — these jobs fan out over OS×runner
+# (kernel capabilities), not node versions. The Landlock launcher is built
+# from native/landlock-run on each Landlock leg and installed from the same
+# tarballs the main-repository release workflow publishes.
+#
+# Upstream-only by default: the macOS leg bills 10× runner-minutes and the
+# darwin-parity unit lane re-runs the whole suite there, which is upstream QA,
+# not fork feedback. Any repository can still run it manually via dispatch.
 name: Sandbox
 
 on:
   push:
     branches: [master]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,6 +44,7 @@ jobs:
   # e2e.yml's key preflight guards against. Each leg therefore asserts BOTH
   # its platform files actually ran: `Test Files  2 passed (2)`, no skips.
   sandbox-e2e:
+    if: github.repository == 'deepseek-harness/deepseek-harness' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
