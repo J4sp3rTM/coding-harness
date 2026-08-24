@@ -51,6 +51,23 @@
             reasoningEfforts:
               off:
               high: high
+      # Catalog route with one model appended without replacing the installed
+      # catalog. The model id is not in pi-ai's installed OpenRouter catalog.
+      openrouter:
+        apiKeyEnv: OPENROUTER_API_KEY
+        additionalModels:
+          - id: stealth/ox-alpha
+            name: Ox Alpha
+            contextWindow: 1048576
+            maxTokens: 131072
+            input: [text, image]
+            reasoningEfforts:
+              low: low
+              high: high
+              max: max
+            compat:
+              thinkingFormat: openrouter
+              supportsReasoningEffort: true
       # Hand-declared route: pi-ai ships nothing under this key, so the profile
       # supplies the whole provider.
       acme-gateway:
@@ -85,6 +102,8 @@
 profile 的 `models` 列表是*替换*该路由已安装 catalog，而不是扩充它；省略它（或留空）则原样服务该 catalog。每个条目都会从同 `id` 的已安装模型继承自身未设置的字段，因此把 catalog 路由收窄到两个模型、更正某个容量，或加入一个比已安装 catalog 更新的模型，都是一行编辑——但一旦声明了 `models` 列表，该路由要继续服务的每个模型就都必须出现在其中，条目哪怕只写一个 `id` 也足够。可配置的条目字段是 `id`、`name`、`contextWindow`、`maxTokens`、`reasoningEfforts` 与 `compat`。定价与输入模态没有 harness 消费方，因此沿用已安装条目或直接缺席。
 
 `modelOverrides` 无需这份代价就能就地重塑单个已安装 catalog 模型：每个键是一个 catalog 模型 id，每个值可写 `models` 条目接受的同一批字段，只是 id 落在键上，而 catalog 的其余部分原样继续服务——「改一个模型、其余三十七个原样保留」只是一次三行编辑。一条覆盖会成为该 catalog 条目的配置，因此容量、档位与 compat 沿与 `models` 条目相同的路径解析，携带相同的诊断与相同的请求默认值语义。覆盖只在正服务自身 catalog 的 catalog 路由上才有意义：与 `models` 列表并存的一份（该列表本就替换了 catalog）、落在手工声明路由上的一份（其模型已在 `models` 中完整写出），或点名了 catalog 未描述模型的一份，都会被拒绝而非跳过，因为一个静默保持原样的模型，就是一个否则要有人费力追查的笔误。
+
+`additionalModels` 会在保留所有已安装模型的同时，把条目追加到已安装提供方 catalog。它适合 catalog 尚未收录的新模型，例如在 `openrouter` 上添加 `stealth/ox-alpha`；每个条目使用与 `models` 相同的字段，并继续采用路由与模型默认值。手工声明路由、非空的替换 `models` 列表旁，或条目 id 已存在于已安装 catalog 时，都会拒绝该字段。已有 id 应改用 `modelOverrides`。追加条目的重复 id 同样会被拒绝。
 
 ### 按模型的推理（reasoning）档位
 
@@ -121,7 +140,7 @@ profile 的 `models` 列表是*替换*该路由已安装 catalog，而不是扩�
 
 **没有**这份元数据的模型——条目未声明 `reasoningEfforts` 的手工声明模型，以及 pi-ai 标记为不具备推理能力的 catalog 模型——完全不公开 `reasoning`。pi-ai 会把这类模型报告为只支持 `off` 一档，但 `off` 会被翻译成*省略* reasoning 选项，而那与「不点名任何档位」产出的请求逐字节相同：选它关不掉任何东西，于是自身默认就在思考的提供方，会在界面显示 `off` 被选中的同时继续思考。把该能力报告为不可用，界面就只剩提供方默认这一项，不会再出现自相矛盾的控件。配置 profile 的 `reasoning` 值（包括 `off`）在存在时是部署默认值；省略它会保留提供方默认值。每次请求的 `GenerateOptions.reasoningEffort` 优先；未出现在确切模型能力中的档位会让**请求**在网络 I/O 前以 `UNSUPPORTED_REASONING_EFFORT` 失败，而不会被自动调整。**描述**一个模型则从不这样失败：同一提供方下各模型接受的档位并不一致，因此 `resolveModel` 对该模型拿不下的 profile 档位报告为「没有默认值」，而不是抛错。在那里抛错会让整个提供方从任何基于它构建的模型目录中消失——一个配错的 profile 字段连支持该档位的模型也一并藏起来——所以坏配置暴露在被执行处，而不是被描述处。pi-ai 的通用流选项通过省略 `reasoning` 表示 `off`。
 
-受支持的 profile 字段是 `apiKeyEnv`、`displayName`、`api`、`baseURL`、`models`、`modelOverrides`、`compat`、`defaultContextWindow`、`defaultMaxTokens`、`defaultInput`、`headers`、`reasoning`、`thinkingBudgets`、`cacheRetention`、`transport`、`timeoutMs`、`websocketConnectTimeoutMs`、`streamIdleTimeoutMs` 和 `retryPolicy`。每个 profile 的可选重试策略都会与该提供方路由一同捕获；省略时使用有界的常规默认值。流空闲间隔必须是正的有限 Node 定时器延迟，默认为五分钟，且只覆盖未完成提供方读取，不包括消费方思考时间。若已配置标头中有同名项，则以 Harness 应用归因为准。
+受支持的 profile 字段是 `apiKeyEnv`、`displayName`、`api`、`baseURL`、`models`、`additionalModels`、`modelOverrides`、`compat`、`defaultContextWindow`、`defaultMaxTokens`、`defaultInput`、`headers`、`reasoning`、`thinkingBudgets`、`cacheRetention`、`transport`、`timeoutMs`、`websocketConnectTimeoutMs`、`streamIdleTimeoutMs` 和 `retryPolicy`。每个 profile 的可选重试策略都会与该提供方路由一同捕获；省略时使用有界的常规默认值。流空闲间隔必须是正的有限 Node 定时器延迟，默认为五分钟，且只覆盖未完成提供方读取，不包括消费方思考时间。若已配置标头中有同名项，则以 Harness 应用归因为准。
 
 适配器强制 pi-ai SDK `maxRetries` 为零，因此一次 `stream()` 调用只会发起一次提供方请求。已移除 profile 字段 `maxRetries` 和 `maxRetryDelayMs` 会使加载失败，而不是静默倍增或隐藏单独组合的 agent（智能体）级重试预算。空闲超时会 abort SDK 的稳定请求信号，并以 `TIMEOUT` 呈现；较早的调用方 abort 仍为 `ABORTED`。
 

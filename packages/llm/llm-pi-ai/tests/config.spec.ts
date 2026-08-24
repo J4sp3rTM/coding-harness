@@ -64,3 +64,24 @@ describe('modality schema boundary', () => {
     expect(absent.providers['acme-gateway']?.defaultInput).toEqual(['text'])
   })
 })
+
+describe('additionalModels schema boundary', () => {
+  it('accepts the append-only catalog extension fields', () => {
+    const value = Config({
+      providers: {
+        openrouter: {
+          additionalModels: [{
+            id: 'stealth/ox-alpha',
+            name: 'Ox Alpha',
+            contextWindow: 1_048_576,
+            maxTokens: 131_072,
+            input: ['text', 'image'],
+            reasoningEfforts: { low: 'low', high: 'high', max: 'max' },
+            compat: { thinkingFormat: 'openrouter', supportsReasoningEffort: true },
+          }],
+        },
+      },
+    })
+    expect(value.providers?.openrouter?.additionalModels?.[0]?.id).toBe('stealth/ox-alpha')
+  })
+})

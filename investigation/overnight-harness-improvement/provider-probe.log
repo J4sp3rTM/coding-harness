@@ -1,0 +1,7 @@
+2026-08-23T15:58:58.5303747+02:00 probe 1: HTTP 429
+2026-08-23T16:07:00.2089648+02:00 probe 2: healthy ('ok)'
+2026-08-23T16:15:06.2746506+02:00 probe 3: healthy ('ok)'
+2026-08-23T16:15:06.2760441+02:00 pool recovered after 3 probes; launching repair cycle
+2026-08-23T16:22:12.4138198+02:00 repair cycle exit=0
+2026-08-23T18:56:03.8112178+02:00 prepair probe 1: healthy
+2026-08-23T18:56:32.1820833+02:00 prepair probe 2: healthy

@@ -57,6 +57,8 @@
 
 生产环境的协议层有意只实现这一单次执行约定所需的 app-server 方法。开发证据锁定在 `@openai/codex@0.147.0` / `codex-cli 0.147.0`；该 NPM 包仅作为测试依赖，部署环境仍需通过 `PATH` 提供 `codex`。
 
+包根目录还导出 `codexAppServerArgv` 和 `CodexAppServerWire`，供私有评估与协议验证使用。这些底层辅助项遵循同一个固定命令以及单线程、单轮次的协议限制；生产集成应使用已注册的 `codex` subagent 提供方。
+
 ## 模型体验
 
 ### 子级请求
