@@ -98,9 +98,13 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-            echo "::error::DEEPSEEK_API_KEY is empty. The e2e suite would self-skip and"
-            echo "::error::report a false green. Configure the repo secret DEEPSEEK_API_KEY_EXTERNAL."
-            exit 1
+            if [ "${GITHUB_REPOSITORY}" = "deepseek-ai/deepseek-harness" ]; then
+              echo "::error::DEEPSEEK_API_KEY is empty. The e2e suite would self-skip and"
+              echo "::error::report a false green. Configure the repo secret DEEPSEEK_API_KEY_EXTERNAL."
+              exit 1
+            fi
+            echo "::warning::DEEPSEEK_API_KEY is empty on ${GITHUB_REPOSITORY}. Skipping the real-API e2e suite because DEEPSEEK_API_KEY_EXTERNAL is not configured."
+            exit 0
           fi
           echo "DEEPSEEK_API_KEY present."
 

@@ -61,7 +61,7 @@ jobs:
   # serial-linux-selfhosted standby lane below. The Windows failover switch is
   # the separate DSH_CI_FAILOVER_WINDOWS variable on the windows-native job below.
   node-24:
-    if: github.event_name == 'pull_request'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'pull_request'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -113,7 +113,7 @@ jobs:
         run: pnpm run check:ci:static
 
   node-24-coverage:
-    if: github.event_name == 'pull_request'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'pull_request'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -176,7 +176,7 @@ jobs:
         run: pnpm run check:ci:coverage
 
   node-24-consumers:
-    if: github.event_name == 'pull_request'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'pull_request'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -445,7 +445,7 @@ jobs:
   # DSH_CI_FAILOVER_LINUX variable that retargets the three required Linux jobs
   # and the all-checks-passed verdict above.
   windows-native:
-    if: github.event_name == 'pull_request'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'pull_request'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -575,7 +575,7 @@ jobs:
   # tool caches make them redundant (and saving here would poison the hosted
   # cache namespace with self-hosted paths).
   serial-linux-selfhosted:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'
     name: serial / linux (self-hosted standby)
     runs-on: [self-hosted, linux, x64, vm-backup]
     steps:
@@ -659,7 +659,7 @@ jobs:
   # and tool caches make them redundant (and saving here would poison the
   # hosted cache namespace with self-hosted paths).
   serial-windows:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'
     name: serial / windows (self-hosted standby)
     runs-on: [self-hosted, dsh-win-ci, windows]
     timeout-minutes: 120
@@ -701,7 +701,7 @@ jobs:
   # Manual, bounded comparison of the actual critical Linux and Windows lanes.
   # The named pools are restricted at the organization level to this repository.
   larger-runner-benchmark:
-    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -792,7 +792,7 @@ jobs:
   # complete unsharded primary aggregate with bounded in-runner parallelism;
   # Windows runs both blocking build targets concurrently through run-gates.
   consolidated-runner-benchmark:
-    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -932,7 +932,19 @@ jobs:
     if: always() && github.event_name == 'pull_request'
     steps:
       - name: Fail if any needed job did not succeed
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        # Larger-runner Linux jobs skip outside deepseek-harness/deepseek-harness.
+        # Treat those skips as success there; keep every skip fatal upstream.
+        if: >-
+          contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || needs.node-compat.result == 'skipped'
+          || needs.python-sdk.result == 'skipped'
+          || needs.python-runtime.result == 'skipped'
+          || needs.windows.result == 'skipped'
+          || (github.repository == 'deepseek-harness/deepseek-harness'
+              && (needs.node-24.result == 'skipped'
+                  || needs.node-24-coverage.result == 'skipped'
+                  || needs.node-24-consumers.result == 'skipped'))
         run: |
           echo "::error::Needed job results: ${{ join(needs.*.result, ', ') }}"
           exit 1
