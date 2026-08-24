@@ -419,6 +419,23 @@ describe('catalog routes with per-model configuration', () => {
     })
   })
 
+  it('lists Ox Alpha from the OpenRouter catalog without additionalModels', () => {
+    const resolved = resolveProfiles({ openrouter: {} }).get('openrouter')?.piProvider.getModels() ?? []
+    const model = resolved.find(candidate => candidate.id === 'stealth/ox-alpha')
+
+    expect(model).toMatchObject({
+      id: 'stealth/ox-alpha',
+      name: 'Ox Alpha',
+      provider: 'openrouter',
+      contextWindow: 1_048_576,
+      maxTokens: 131_072,
+      input: ['text', 'image'],
+      reasoning: true,
+      compat: { thinkingFormat: 'openrouter', supportsReasoningEffort: true },
+    })
+    expect(getSupportedThinkingLevels(model as Model<Api>)).toEqual(['low', 'high', 'max'])
+  })
+
   it('overrides one catalog model field and defaults the rest from the catalog', async () => {
     const server = await mockServer([])
     const [catalogModel] = getBuiltinModels('deepseek')
@@ -777,22 +794,30 @@ describe('additionalModels', () => {
     compat: { thinkingFormat: 'openrouter', supportsReasoningEffort: true },
   }
 
-  it('appends Ox Alpha to the installed OpenRouter catalog with its declared metadata', () => {
+  it('appends a model the OpenRouter catalog does not describe', () => {
+    const extra: LlmPiAi.PiAiModelProfile = {
+      id: 'vendor/new-model',
+      name: 'New Model',
+      contextWindow: 8_192,
+      maxTokens: 1_024,
+    }
+    const resolved = resolveProfiles({ openrouter: { additionalModels: [extra] } })
+    const models = resolved.get('openrouter')?.piProvider.getModels() ?? []
+    expect(models).toHaveLength(getBuiltinModels('openrouter').length + 2)
+    expect(models.find(entry => entry.id === extra.id)).toMatchObject({
+      provider: 'openrouter',
+      id: 'vendor/new-model',
+      name: 'New Model',
+      contextWindow: 8_192,
+      maxTokens: 1_024,
+    })
+  })
+
+  it('ignores a leftover Ox Alpha additionalModels entry', () => {
     const resolved = resolveProfiles({ openrouter: { additionalModels: [oxAlpha] } })
     const models = resolved.get('openrouter')?.piProvider.getModels() ?? []
-    const model = models.find(entry => entry.id === oxAlpha.id)
-    expect(models).toHaveLength(getBuiltinModels('openrouter').length + 1)
-    expect(model).toMatchObject({
-      provider: 'openrouter',
-      id: 'stealth/ox-alpha',
-      name: 'Ox Alpha',
-      contextWindow: 1_048_576,
-      maxTokens: 131_072,
-      input: ['text', 'image'],
-      reasoning: true,
-      compat: { thinkingFormat: 'openrouter', supportsReasoningEffort: true },
-    })
-    expect(getSupportedThinkingLevels(model as Model<Api>)).toEqual(['low', 'high', 'max'])
+    expect(models.filter(entry => entry.id === oxAlpha.id)).toHaveLength(1)
+    expect(models.find(entry => entry.id === oxAlpha.id)?.name).toBe('Ox Alpha')
   })
 
   it('rejects additional models on a hand-declared route', () => {

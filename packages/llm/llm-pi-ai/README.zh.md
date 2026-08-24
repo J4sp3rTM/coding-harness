@@ -51,23 +51,14 @@
             reasoningEfforts:
               off:
               high: high
-      # Catalog route with one model appended without replacing the installed
-      # catalog. The model id is not in pi-ai's installed OpenRouter catalog.
+      # Catalog route: OpenRouter, including stealth/ox-alpha from this adapter.
       openrouter:
         apiKeyEnv: OPENROUTER_API_KEY
         additionalModels:
-          - id: stealth/ox-alpha
-            name: Ox Alpha
-            contextWindow: 1048576
-            maxTokens: 131072
-            input: [text, image]
-            reasoningEfforts:
-              low: low
-              high: high
-              max: max
-            compat:
-              thinkingFormat: openrouter
-              supportsReasoningEffort: true
+          - id: vendor/new-model
+            name: New Model
+            contextWindow: 8192
+            maxTokens: 1024
       # Hand-declared route: pi-ai ships nothing under this key, so the profile
       # supplies the whole provider.
       acme-gateway:
@@ -103,7 +94,7 @@ profile 的 `models` 列表是*替换*该路由已安装 catalog，而不是扩�
 
 `modelOverrides` 无需这份代价就能就地重塑单个已安装 catalog 模型：每个键是一个 catalog 模型 id，每个值可写 `models` 条目接受的同一批字段，只是 id 落在键上，而 catalog 的其余部分原样继续服务——「改一个模型、其余三十七个原样保留」只是一次三行编辑。一条覆盖会成为该 catalog 条目的配置，因此容量、档位与 compat 沿与 `models` 条目相同的路径解析，携带相同的诊断与相同的请求默认值语义。覆盖只在正服务自身 catalog 的 catalog 路由上才有意义：与 `models` 列表并存的一份（该列表本就替换了 catalog）、落在手工声明路由上的一份（其模型已在 `models` 中完整写出），或点名了 catalog 未描述模型的一份，都会被拒绝而非跳过，因为一个静默保持原样的模型，就是一个否则要有人费力追查的笔误。
 
-`additionalModels` 会在保留所有已安装模型的同时，把条目追加到已安装提供方 catalog。它适合 catalog 尚未收录的新模型，例如在 `openrouter` 上添加 `stealth/ox-alpha`；每个条目使用与 `models` 相同的字段，并继续采用路由与模型默认值。手工声明路由、非空的替换 `models` 列表旁，或条目 id 已存在于已安装 catalog 时，都会拒绝该字段。已有 id 应改用 `modelOverrides`。追加条目的重复 id 同样会被拒绝。
+`additionalModels` 会在保留所有已安装模型的同时，把条目追加到已安装提供方 catalog。它适合 catalog 尚未收录的新模型；每个条目使用与 `models` 相同的字段，并继续采用路由与模型默认值。`stealth/ox-alpha` 已在本适配器服务的 OpenRouter catalog 中，包括在没有 settings profile 的情况下完成登录之后，因此对该 id 的遗留追加会被忽略。手工声明路由、非空的替换 `models` 列表旁，或任何其他条目 id 已存在于已安装 catalog 时，都会拒绝该字段。已有 id 应改用 `modelOverrides`。追加条目的重复 id 同样会被拒绝。
 
 ### 按模型的推理（reasoning）档位
 

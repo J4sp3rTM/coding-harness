@@ -51,23 +51,14 @@ Configure credentials, the model catalog, and deployment-specific transport sett
             reasoningEfforts:
               off:
               high: high
-      # Catalog route with one model appended without replacing the installed
-      # catalog. The model id is not in pi-ai's installed OpenRouter catalog.
+      # Catalog route: OpenRouter, including stealth/ox-alpha from this adapter.
       openrouter:
         apiKeyEnv: OPENROUTER_API_KEY
         additionalModels:
-          - id: stealth/ox-alpha
-            name: Ox Alpha
-            contextWindow: 1048576
-            maxTokens: 131072
-            input: [text, image]
-            reasoningEfforts:
-              low: low
-              high: high
-              max: max
-            compat:
-              thinkingFormat: openrouter
-              supportsReasoningEffort: true
+          - id: vendor/new-model
+            name: New Model
+            contextWindow: 8192
+            maxTokens: 1024
       # Hand-declared route: pi-ai ships nothing under this key, so the profile
       # supplies the whole provider.
       acme-gateway:
@@ -103,7 +94,7 @@ A profile's `models` list *replaces* the route's installed catalog rather than e
 
 `modelOverrides` reshapes individual installed-catalog models without that cost: each key is a catalog model id, each value the same fields a `models` entry takes with the id living in the key, and the rest of the catalog keeps serving untouched — "correct one model, keep the other thirty-seven" as a three-line edit. An override becomes that catalog entry's configuration, so capacities, efforts, and compat resolve through the same path with the same diagnostics and the same request-default semantics as a `models` entry. Overrides are only meaningful on a catalog route serving its catalog: one set beside a `models` list (which already replaces the catalog), on a hand-declared route (whose models are fully spelled in `models`), or naming a model the catalog does not describe is refused rather than skipped, because a silently unchanged model is a typo someone would otherwise hunt for.
 
-`additionalModels` appends entries to an installed provider catalog while leaving every installed model available. It is for a catalog that has not caught up with a provider's newly available model, such as `openrouter` plus `stealth/ox-alpha`; each entry uses the same fields as `models`, and the route and model defaults still apply. It is rejected on a hand-declared route, beside a non-empty replacement `models` list, or when an entry id already exists in the installed catalog. For an existing id, use `modelOverrides` instead. Duplicate appended ids are rejected as well.
+`additionalModels` appends entries to an installed provider catalog while leaving every installed model available. It is for a catalog that has not caught up with a provider's newly available model; each entry uses the same fields as `models`, and the route and model defaults still apply. `stealth/ox-alpha` is already in the OpenRouter catalog this adapter serves, including after a sign-in with no settings profile, so a leftover append of that id is ignored. It is rejected on a hand-declared route, beside a non-empty replacement `models` list, or when any other entry id already exists in the installed catalog. For an existing id, use `modelOverrides` instead. Duplicate appended ids are rejected as well.
 
 ### Per-model reasoning efforts
 
