@@ -94,7 +94,7 @@ Runnable leaves load their plugin trees from `examples/*/cordis.yml`; the root `
 
 ## The feature → mechanism map
 
-Every product feature maps to a listener on a documented extension point — the microkernel claim made checkable ([microkernel Agent Note](../../.agents/notes/implemented/architecture/2026-06-11-microkernel-event-taxonomy.md)). No row modifies the loop.
+Every product feature maps to a listener on a documented extension point — the microkernel claim made checkable ([microkernel Agent Note](../architecture.md)). No row modifies the loop.
 
 `system-prompt/assemble` is an expert cooperative whole-assembly transform: its returned assembly is authoritative, so listener authors own preserving active Code Mode and structured-output protocol contributions. Prefer `ctx.tools.restrict()` for tool filtering that must stay aligned across presentation, lookup, and execution.
 
@@ -105,7 +105,7 @@ Every product feature maps to a listener on a documented extension point — the
 | `/loop` | on the `turn/end` session event, `followup()` the next iteration; or force-continue |
 | Dynamic workflow | `ctx.workflowEngine` + the worker-thread engine + the `workflow` tool; structured in-process children enforce output with scoped prompt/tool registrations, a monotonic tool guard, final `tools/result` commit (including enclosing `run_code`), and the structured-output execution's monotonic `concludeTurn()` marker |
 | Queued + steering messages | core `Agent.followup()` / `Agent.steer()` |
-| Context compaction (auto + manual) | the `ctx.compaction` seam + `dsh-compaction-basic`; automatic pressure runs on serial `agent/pre-step`, canonical overflow recovery runs on `agent/request-error`, and manual callers use the same compact service ([compaction Agent Note](../../.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md)) |
+| Context compaction (auto + manual) | the `ctx.compaction` seam + `dsh-compaction-basic`; automatic pressure runs on serial `agent/pre-step`, canonical overflow recovery runs on `agent/request-error`, and manual callers use the same compact service ([compaction Agent Note](../subsystems/compaction.md)) |
 | System prompt configurability | `ctx.systemPrompt.section()` with ordering and scope-local shadowing |
 | AGENTS.md (root) | a section provider reading the file |
 | AGENTS.md (subdir, on-touch) + file-change notices | `agent.inject()` from a watcher / tool-result listener |

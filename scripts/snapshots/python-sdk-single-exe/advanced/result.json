@@ -1090,7 +1090,8 @@
         "seq": 1,
         "label": "workflow-child",
         "phase": "Delegate",
-        "childId": "{{child-2}}"
+        "childId": "{{child-2}}",
+        "effortSource": "provider-default"
       }
     },
     {
@@ -3660,7 +3661,8 @@
             "seq": 1,
             "label": "workflow-child",
             "phase": "Delegate",
-            "childId": "{{child-2}}"
+            "childId": "{{child-2}}",
+            "effortSource": "provider-default"
           }
         }
       }
