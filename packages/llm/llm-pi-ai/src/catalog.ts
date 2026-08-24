@@ -79,6 +79,37 @@ const THINKING_LEVEL_GATE: Record<ModelThinkingLevel, true> = {
 /** Every pi-ai thinking level a profile may declare, in escalation order. */
 export const THINKING_LEVELS = Object.keys(THINKING_LEVEL_GATE) as readonly ModelThinkingLevel[]
 
+/** OpenRouter model the installed pi-ai catalog has not caught up with. */
+const OPENROUTER_OX_ALPHA_ID = 'stealth/ox-alpha'
+
+/**
+ * Harness overlay for {@link OPENROUTER_OX_ALPHA_ID}. Signing in or connecting
+ * OpenRouter serves the installed catalog only, so a model pi-ai does not yet
+ * ship must live here or it never appears in selectors or discovery.
+ */
+const OPENROUTER_OX_ALPHA: Model<'openai-completions'> = {
+  id: OPENROUTER_OX_ALPHA_ID,
+  name: 'Ox Alpha',
+  api: 'openai-completions',
+  provider: 'openrouter',
+  baseUrl: 'https://openrouter.ai/api/v1',
+  reasoning: true,
+  input: ['text', 'image'],
+  cost: NO_COST,
+  contextWindow: 1_048_576,
+  maxTokens: 131_072,
+  thinkingLevelMap: {
+    off: null,
+    minimal: null,
+    low: 'low',
+    medium: null,
+    high: 'high',
+    xhigh: null,
+    max: 'max',
+  },
+  compat: { thinkingFormat: 'openrouter', supportsReasoningEffort: true },
+}
+
 /** The `compat.thinkingFormat` spellings pi-ai accepts on an `openai-completions` model. */
 type PiThinkingFormat = NonNullable<OpenAICompletionsCompat['thinkingFormat']>
 
@@ -182,7 +213,12 @@ export function catalogProviderTakesOAuth(provider: string): boolean {
 export function catalogModels(provider: string): Map<string, Model<Api>> {
   if (!catalogProviders().has(provider)) return new Map()
   const models = getBuiltinModels(provider as BuiltinProvider) as Model<Api>[]
-  return new Map(models.map(model => [model.id, model]))
+  const byId = new Map(models.map(model => [model.id, model]))
+  // Keep the overlay only while pi-ai itself does not describe the id.
+  if (provider === 'openrouter' && !byId.has(OPENROUTER_OX_ALPHA.id)) {
+    byId.set(OPENROUTER_OX_ALPHA.id, OPENROUTER_OX_ALPHA)
+  }
+  return byId
 }
 
 /**
@@ -480,6 +516,9 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
   for (const entry of additional) {
     if (entry.id.length === 0) invalid(provider, 'has an additionalModels entry with an empty model id')
     if (defaults.has(entry.id)) {
+      // The harness overlay already serves this id; a leftover append from
+      // before that shipped is a no-op rather than a load failure.
+      if (entry.id === OPENROUTER_OX_ALPHA_ID) continue
       invalid(provider, `additionalModels names "${entry.id}", which the installed catalog already describes;`
         + ' use modelOverrides to customize it')
     }
@@ -517,7 +556,7 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
     ? configured
     : [
       ...[...defaults.values()].map(model => ({ id: model.id, ...overrides[model.id] })),
-      ...additional,
+      ...additional.filter(entry => !defaults.has(entry.id)),
     ]
   if (entries.length === 0) {
     invalid(provider, 'resolves no models; the installed catalog does not describe this route, so its models'

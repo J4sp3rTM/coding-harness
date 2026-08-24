@@ -235,3 +235,15 @@ describe('the configurable-provider directory', () => {
     expect(ctx.llm.listConfigurableProviders().map(entry => entry.provider)).toContain('openai-codex')
   })
 })
+
+describe('adopted OpenRouter catalog', () => {
+  it('lists Ox Alpha after a sign-in with no settings profile', async () => {
+    const dir = await home()
+    const ctx = await boot(dir, {}, { openrouter: TOKEN })
+    await vi.waitFor(() => {
+      expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('openrouter')
+    })
+    const models = await ctx.llm.listModels('openrouter')
+    expect(models.some(model => model.id === 'stealth/ox-alpha')).toBe(true)
+  })
+})
