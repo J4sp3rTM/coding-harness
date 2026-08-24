@@ -9,6 +9,7 @@
  */
 
 import { join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { decodeStorageRecord, packChunkRuns, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader, SessionId, StorageRecord } from '@deepseek-ai/dsh-session'
 import { SessionFormatUnsupportedError, sessionFormatVersionRefusal } from '@deepseek-ai/dsh-session-persistence'
@@ -268,6 +269,10 @@ function parseHeaderRecord(record: Buffer): SessionHeader {
  * supplied header record. Newline search and byte offsets stay on raw buffers;
  * only complete records are decoded to UTF-8. A fragment crossing writes is
  * copied because a decoder may reuse its output buffer after `write()` returns.
+ * An event row may overlap the committed prefix when every repeated event is
+ * structurally identical. A packed chunk row may also cross the committed
+ * cursor: its stale prefix is ignored and its contiguous suffix continues the
+ * log. Other conflicting repeats and forward sequence gaps are corruption.
  */
 export class SessionLogScanner {
   private readonly meta: SessionHeader
@@ -360,18 +365,34 @@ export class SessionLogScanner {
     }
 
     const rowStart = this.events.length
+    const crossesCommittedCursor = decoded.length > 1
+      && decoded.every(event => event.type === 'assistant/chunk')
+      && (decoded[0]?.seq ?? rowStart) < rowStart
+      && (decoded.at(-1)?.seq ?? -1) >= rowStart
     for (const event of decoded) {
-      if (event.seq !== this.events.length) {
-        const expected = this.events.length
+      const expected = this.events.length
+      if (event.seq === expected) {
+        this.events.push(event)
+        continue
+      }
+      if (Number.isSafeInteger(event.seq) && event.seq >= 0 && event.seq < expected) {
+        const committed = this.events[event.seq]
+        if (crossesCommittedCursor || (committed !== undefined && isDeepStrictEqual(committed, event))) continue
         this.events.length = rowStart
         this.issue = new Error(
-          `corrupt session log: seq gap in committed region at line ${this.eventLine} `
+          `corrupt session log: seq conflict in committed region at line ${this.eventLine} `
           + `(expected ${expected}, got ${event.seq})`,
         )
         if (decoded.some(candidate => candidate.type === 'turn/end')) throw this.issue
         return
       }
-      this.events.push(event)
+      this.events.length = rowStart
+      this.issue = new Error(
+        `corrupt session log: seq gap in committed region at line ${this.eventLine} `
+        + `(expected ${expected}, got ${event.seq})`,
+      )
+      if (decoded.some(candidate => candidate.type === 'turn/end')) throw this.issue
+      return
     }
     this.committedBytes = endByte
   }

@@ -47,7 +47,13 @@ const write = (path, content) => {
 
 /** Rasterize the master SVG at one square size; density keeps it vector-sharp. */
 const rasterize = async (size) => {
-  const density = Math.ceil(72 * (size / 50))
+  // librsvg renders at intrinsic size × density/72, so the density must scale
+  // from the logo's own intrinsic width — logos ship with any viewBox.
+  const viewBox = /viewBox="([^"]*)"/.exec(logo.toString('utf8'))?.[1]?.trim().split(/[\s,]+/).map(Number)
+  const intrinsic = viewBox !== undefined && viewBox.every(Number.isFinite) && viewBox[2] > 0
+    ? viewBox[2]
+    : 50
+  const density = Math.ceil(72 * (size / intrinsic))
   return sharp(logo, { density }).resize(size, size).png({ compressionLevel: 9 }).toBuffer()
 }
 

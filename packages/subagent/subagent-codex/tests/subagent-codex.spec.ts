@@ -372,7 +372,7 @@ describe('CodexAppServerWire', () => {
     expect(initialize.params).toEqual({
       clientInfo: {
         name: 'deepseek-harness',
-        title: 'DeepSeek Harness',
+        title: 'Conduit',
         version: '0.0.1',
       },
       capabilities: {

@@ -1133,6 +1133,54 @@ describe('JsonlSessionPersistence: default packed chunk rows', () => {
     expect(events[2]).toEqual({ type: 'assistant/chunk', seq: 2, time: 3, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'b' } } })
   })
 
+  it('scanLog: keeps committed events over a stale packed-row prefix and accepts its new suffix', () => {
+    const logText = [
+      JSON.stringify({ type: 'session', version: 0, id: 'overlap', createdAt: 1, delegationDepth: 0 }),
+      JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+      JSON.stringify({ type: 'text-chunks', seq0: 1, time0: 2, data: { turn: 1, step: 1, index: 0, dt: [1, 1], texts: ['a', 'b', 'c'] } }),
+      JSON.stringify({ type: 'text-chunks', seq0: 1, time0: 20, data: { turn: 1, step: 1, index: 0, dt: [1, 1, 1, 1], texts: ['stale-a', 'stale-b', 'stale-c', 'd', 'e'] } }),
+      JSON.stringify({ type: 'turn/end', seq: 6, time: 7, data: { turn: 1, reason: { kind: 'completed' } } }),
+    ].join('\n') + '\n'
+
+    const { events } = scanLog(Buffer.from(logText))
+
+    expect(events.map(event => event.seq)).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(events.filter(event => event.type === 'assistant/chunk').map(event => event.data.chunk)).toEqual([
+      { type: 'text-delta', index: 0, text: 'a' },
+      { type: 'text-delta', index: 0, text: 'b' },
+      { type: 'text-delta', index: 0, text: 'c' },
+      { type: 'text-delta', index: 0, text: 'd' },
+      { type: 'text-delta', index: 0, text: 'e' },
+    ])
+  })
+
+  it('scanLog: ignores an exact repeated event row', () => {
+    const start = { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }
+    const logText = [
+      JSON.stringify({ type: 'session', version: 0, id: 'exact-repeat', createdAt: 1, delegationDepth: 0 }),
+      JSON.stringify(start),
+      JSON.stringify(start),
+      JSON.stringify({ type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: { kind: 'completed' } } }),
+    ].join('\n') + '\n'
+
+    expect(scanLog(Buffer.from(logText)).events).toEqual([
+      start,
+      { type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ])
+  })
+
+  it('scanLog: rejects a conflicting duplicated sequence in committed history', () => {
+    const logText = [
+      JSON.stringify({ type: 'session', version: 0, id: 'overlap-conflict', createdAt: 1, delegationDepth: 0 }),
+      JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+      JSON.stringify({ type: 'assistant/chunk', seq: 1, time: 2, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'a' } } }),
+      JSON.stringify({ type: 'assistant/chunk', seq: 1, time: 2, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'different' } } }),
+      JSON.stringify({ type: 'turn/end', seq: 2, time: 3, data: { turn: 1, reason: { kind: 'completed' } } }),
+    ].join('\n') + '\n'
+
+    expect(() => scanLog(Buffer.from(logText))).toThrow(/seq conflict in committed region/)
+  })
+
   it('scanLog: a malformed packed row in the committed region rejects like corrupt JSON', () => {
     const logText = [
       JSON.stringify({ type: 'session', version: 0, id: 'bad-row', createdAt: 1, delegationDepth: 0 }),

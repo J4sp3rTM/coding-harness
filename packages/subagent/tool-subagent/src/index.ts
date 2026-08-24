@@ -12,7 +12,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, type ContentBlock, type ReasoningEffortId as ReasoningEffortIdType } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import { assertSubagentMaxDepth, settleRun } from '@deepseek-ai/dsh-subagent'
 import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
@@ -87,8 +87,16 @@ export const Config: z<Config> = z.object({
   agentOptions: z.object({
     provider: z.string(),
     model: z.string(),
+    // Schemastery has no branded-id primitive; the loader accepts any string
+    // and the LLM runtime owns route membership (see the per-call `effort`).
+    reasoningEffort: z.string() as unknown as z<ReasoningEffortIdType>,
     maxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
-  }).default(undefined as unknown as { provider: string; model: string; maxTokens: number }),
+  }).default(undefined as unknown as {
+    provider: string
+    model: string
+    reasoningEffort: ReasoningEffortIdType
+    maxTokens: number
+  }),
   persona: z.string(),
   // Preserve omission; Schemastery's `{ allow: [] }` default would deny every tool.
   toolFilter: z.object({
@@ -265,6 +273,62 @@ function resolveDelegationRun(
   }
 }
 
+/** Per-call override arguments a delegating model may pass alongside the prompt. */
+interface DelegationOverrideRequest {
+  readonly model?: string
+  readonly effort?: string
+}
+
+/**
+ * Validate one optional per-call override argument.
+ * @param value - the raw model-supplied argument.
+ * @param parameter - the parameter name named by the thrown error.
+ * @returns the untouched argument, or undefined when absent.
+ * @throws when the argument is present but empty or whitespace-only.
+ */
+function requirePresentOverride(value: string | undefined, parameter: string): string | undefined {
+  if (value === undefined) return undefined
+  // The schema validator permits loose values, so an empty string also needs
+  // execution-time enforcement (the resolveDelegationRun precedent).
+  if (value.trim().length === 0) {
+    throw new Error(`\`${parameter}\` must be a non-empty string when provided`)
+  }
+  return value
+}
+
+/**
+ * Resolve one delegation's agent options from the deployment defaults plus the
+ * calling model's per-call overrides: `model` overrides `AgentOptions.model`
+ * and `effort` overrides `AgentOptions.reasoningEffort`, field by field, with
+ * every other configured field preserved. With no override argument at all,
+ * `config.agentOptions` is returned as-is — including undefined — so the start
+ * request keeps its exact shape and an omitted config key never materializes
+ * an empty `agentOptions` object onto it.
+ *
+ * Effort ids are adapter-owned per provider/model route (`ReasoningEffortId`
+ * is an open branded id with no static value set), so membership is enforced
+ * where that set lives: the LLM runtime rejects an unsupported effort loud
+ * before provider I/O, which surfaces as a failed child run.
+ * @param config - this instance's deployment-wide child defaults.
+ * @param request - the calling model's validated per-call overrides.
+ * @returns the agent options for this one start, or undefined to send none.
+ * @throws when an override is empty or whitespace-only.
+ */
+function resolveDelegationAgentOptions(
+  config: Pick<Config, 'agentOptions'>,
+  request: DelegationOverrideRequest,
+): AgentOptions | undefined {
+  const model = requirePresentOverride(request.model, 'model')
+  const effort = requirePresentOverride(request.effort, 'effort')
+  if (model === undefined && effort === undefined) return config.agentOptions
+  const base: AgentOptions = config.agentOptions ?? {}
+  return {
+    ...base,
+    ...model !== undefined ? { model } : {},
+    ...effort !== undefined ? { reasoningEffort: ReasoningEffortId(effort) } : {},
+  }
+}
+
 export function apply(ctx: Context, config: Config): void {
   // Direct apply() bypasses Schemastery's numeric constraints. A direct-apply
   // omission stays capless (the schema default only runs through the loader).
@@ -295,6 +359,10 @@ export function apply(ctx: Context, config: Config): void {
         `tool-subagent: provider "${provider.name}" does not support \`backgroundMode: continuable\``,
       )
     }
+    const supportsAgentOptions = continuable || provider.capabilities.agentOptions === true
+    if (!supportsAgentOptions && config.agentOptions !== undefined) {
+      throw new Error(`tool-subagent: provider "${provider.name}" does not support agentOptions`)
+    }
     disposeTool = ctx.tools.register(defineTool({
       name: toolName,
       description: wording.description + (backgroundEnabled
@@ -304,7 +372,10 @@ export function apply(ctx: Context, config: Config): void {
         ? continuable
           ? ' This tool waits for the subagent result by default. Set `run_in_background: true` only for independent work; that returns a durable subagent id and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation.'
           : ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
-        : ' This call waits for the subagent and returns its result.'),
+        : ' This call waits for the subagent and returns its result.')
+      + (supportsAgentOptions
+        ? ' Pass `model` or `effort` to pin this child\'s model id or reasoning effort for this one call only.'
+        : ''),
       parameters: {
         description: {
           type: 'string',
@@ -316,6 +387,16 @@ export function apply(ctx: Context, config: Config): void {
           required: true,
           description: wording.promptDescription,
         },
+        ...supportsAgentOptions ? {
+          model: {
+            type: 'string' as const,
+            description: 'Optional model id override for this child only. Must be a model the configured provider serves; an unknown id fails the child at request time.',
+          },
+          effort: {
+            type: 'string' as const,
+            description: 'Optional reasoning-effort override for this child only. Valid ids are owned by the configured provider\'s adapter for the selected model; an unsupported id fails the child at request time.',
+          },
+        } : {},
         ...backgroundEnabled ? {
           run_in_background: {
             type: 'boolean' as const,
@@ -374,12 +455,21 @@ export function apply(ctx: Context, config: Config): void {
           throw new Error('subagent tool requires a calling agent (exec.agent was undefined)')
         }
 
+        // The validator permits undeclared keys, so an unsupported provider
+        // rejects forced override arguments even though its schema omits them.
+        const overrides: DelegationOverrideRequest = args
+        if (!supportsAgentOptions && (overrides.model !== undefined || overrides.effort !== undefined)) {
+          throw new Error(`subagent provider "${provider.name}" does not support per-call model or effort overrides`)
+        }
+        // Per-call overrides validate and merge before any start, so an invalid
+        // argument is a tool error that never reaches the provider.
+        const agentOptions = resolveDelegationAgentOptions(config, overrides)
         const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
         const request = {
           label: args.description,
           prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
           parent,
-          ...config.agentOptions !== undefined ? { agentOptions: config.agentOptions } : {},
+          ...agentOptions !== undefined ? { agentOptions } : {},
           ...config.persona !== undefined ? { persona: config.persona } : {},
           ...config.toolFilter !== undefined ? { toolFilter: config.toolFilter } : {},
           ...maxDepth !== undefined ? { maxDepth } : {},

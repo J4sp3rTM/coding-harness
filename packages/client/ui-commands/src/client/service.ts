@@ -23,6 +23,10 @@ import type { CommandDescriptor } from './directory.ts'
 import { CommandDirectory } from './directory.ts'
 import { PopupSelectController } from './popup.ts'
 import type { TokenSegment } from './popup.ts'
+import { unknownCommandText } from './suggest.ts'
+
+/** Client-side twin of the registry parser, used only to classify admission misses. */
+const COMMAND_LINE_NAME = /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -309,8 +313,9 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
 
   /**
    * Decision table, enter column. Strong-waits the session's catalog (a
-   * warmup failure rejects — never a silent downgrade). Contributions and
-   * bare host commands act on the bare token only; leadingInput claims
+   * warmup failure rejects — never a silent downgrade). Syntax-valid unknown
+   * commands become local error notices and never reach the model. Contributions
+   * and bare host commands act on the bare token only; leadingInput claims
    * args-tolerant.
    */
   private async matchEnter(session: ClientSessionContext, line: string, signal: AbortSignal): Promise<PickOutcome> {
@@ -327,9 +332,18 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
       this.openPopup(name, contribution.ui, session, { via: 'enter', token })
       return 'handled'
     }
-    await this.directory.ensureReady(session.sessionId, signal)
+    await this.directory.ensureCurrent(session.sessionId, signal)
     const desc = this.directory.resolve(session.sessionId, name)
-    if (desc === undefined) return undefined
+    if (desc === undefined) {
+      const candidate = COMMAND_LINE_NAME.exec(trimmed)?.[1]
+      // Slash-prefixed paths and other malformed tokens remain ordinary prompt
+      // text; a syntactically valid command name is consumed here so it can
+      // never leak into a model request.
+      if (candidate === undefined || candidate !== name) return undefined
+      const names = this.directory.list(session.sessionId).map(descriptor => descriptor.name)
+      this.noticeFor(session.sessionId, 'error', unknownCommandText(trimmed, candidate, names))
+      return 'handled'
+    }
     // Bare enter on a decorated host command opens its popup; an argued line
     // never consults the decoration (the claim/detached paths below own it).
     if (bare) {
@@ -385,7 +399,13 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
   ): Promise<SubmitOutcome> {
     const result = await this.ctx.remote.commands.execute(session.sessionId, line)
     if (!result.ok) throw new Error(`command.execute failed: ${result.error.code}: ${result.error.message}`)
-    if (result.value === undefined) return { kind: 'error', text: `unknown or malformed command: ${line}` }
+    if (result.value === undefined) {
+      // Admission miss: syntax-valid names get near-miss suggestions from the
+      // hot catalog; malformed syntax and cold catalogs read as plain unknown.
+      const candidate = COMMAND_LINE_NAME.exec(line)?.[1]
+      const names = this.directory.list(session.sessionId).map(descriptor => descriptor.name)
+      return { kind: 'error', text: unknownCommandText(line, candidate, names) }
+    }
     this.notifyExecuted(session.sessionId, submittedCommandName(line), result.value.result)
     return { kind: 'success' }
   }

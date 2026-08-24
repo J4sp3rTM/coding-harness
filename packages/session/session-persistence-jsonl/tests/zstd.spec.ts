@@ -450,6 +450,35 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
     expect((await ctx.sessionPersistence.load(header.id)).events).toEqual([...oneTurnLog(), ...secondTurn])
   })
 
+  it('loads a compressed log whose stale chunk frame overlaps the committed prefix', async () => {
+    const root = await freshRoot()
+    const ctx = await mount(root)
+    const header = meta('overlapping-frame')
+    const path = logPath(root, header.cwd, header.id, 'zstd')
+    await mkdir(sessionDir(root, header.cwd, header.id), { recursive: true })
+    await writeFile(path, Buffer.concat(await Promise.all([
+      compressZstdFrame(`${JSON.stringify(toHeaderLine(header))}\n`),
+      compressZstdFrame([
+        JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+        JSON.stringify({ type: 'text-chunks', seq0: 1, time0: 2, data: { turn: 1, step: 1, index: 0, dt: [1, 1], texts: ['a', 'b', 'c'] } }),
+        '',
+      ].join('\n')),
+      compressZstdFrame(`${JSON.stringify({ type: 'text-chunks', seq0: 1, time0: 20, data: { turn: 1, step: 1, index: 0, dt: [1, 1, 1, 1], texts: ['stale-a', 'stale-b', 'stale-c', 'd', 'e'] } })}\n`),
+      compressZstdFrame(`${JSON.stringify({ type: 'turn/end', seq: 6, time: 7, data: { turn: 1, reason: { kind: 'completed' } } })}\n`),
+    ])))
+
+    const loaded = await ctx.sessionPersistence.load(header.id)
+
+    expect(loaded.events.map(event => event.seq)).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(loaded.events.filter(event => event.type === 'assistant/chunk').map(event => event.data.chunk)).toEqual([
+      { type: 'text-delta', index: 0, text: 'a' },
+      { type: 'text-delta', index: 0, text: 'b' },
+      { type: 'text-delta', index: 0, text: 'c' },
+      { type: 'text-delta', index: 0, text: 'd' },
+      { type: 'text-delta', index: 0, text: 'e' },
+    ])
+  })
+
   it('lists from a multi-chunk header frame without decoding a corrupt event frame', async () => {
     const root = await freshRoot()
     const ctx = await mount(root)
