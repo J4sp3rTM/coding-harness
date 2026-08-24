@@ -320,12 +320,13 @@ describe('decorations (bare-invocation UI on host commands)', () => {
     expect(outcome.claim.token).toBe('/goal ')
   })
 
-  it('a decoration with no host row never fires (bare enter misses; menu pick misses)', async () => {
-    const { command, source, mint, warm } = await bench()
+  it('a decoration with no host row never fires; enter adjudicates it as unknown', async () => {
+    const { command, source, mint, warm, notices } = await bench()
     command.decorate(goalDecoration({ name: 'phantom' }))
     const scope = mint('s1')
     await warm(proj('s1'))
-    expect(await source.matchEnter!(proj('s1'), '/phantom', new AbortController().signal)).toBeUndefined()
+    expect(await source.matchEnter!(proj('s1'), '/phantom', new AbortController().signal)).toBe('handled')
+    expect(notices[0]?.text).toBe('unknown command: /phantom')
     expect(menuPick(source, 'phantom', proj('s1'))).toBeUndefined()
     expect(command.popupFor(scope.ctx).state.getSnapshot().open).toBe(false)
   })
@@ -545,10 +546,20 @@ describe('matchEnter (enter column)', () => {
     await expect(source.matchEnter!(proj('s1'), '/theme dark', signal())).resolves.toBeUndefined()
   })
 
-  it('unknown name, bare "/", and non-slash lines → undefined', async () => {
-    const { source, warm } = await bench()
+  it('adjudicates valid unknown names while malformed paths and ordinary text fall through', async () => {
+    const { source, mint, warm, notices } = await bench()
+    mint('s1')
     await warm(proj('s1'))
-    await expect(source.matchEnter!(proj('s1'), '/nope', signal())).resolves.toBeUndefined()
+    await expect(source.matchEnter!(proj('s1'), '/plna', signal())).resolves.toBe('handled')
+    expect(notices).toEqual([{
+      scope: sid('s1'),
+      level: 'error',
+      text: 'unknown command: /plna — did you mean /plan?',
+    }])
+    notices.length = 0
+    await expect(source.matchEnter!(proj('s1'), '/plna with args', signal())).resolves.toBe('handled')
+    expect(notices[0]?.text).toBe('unknown command: /plna with args — did you mean /plan?')
+    await expect(source.matchEnter!(proj('s1'), '/usr/bin', signal())).resolves.toBeUndefined()
     await expect(source.matchEnter!(proj('s1'), '/', signal())).resolves.toBeUndefined()
     await expect(source.matchEnter!(proj('s1'), 'plain text', signal())).resolves.toBeUndefined()
   })
@@ -635,7 +646,7 @@ describe('detached admission notices', () => {
     mode = 'miss'
     await source.matchEnter!(proj('s1'), '/plan', new AbortController().signal)
     await flush()
-    expect(notices).toEqual([{ scope: sid('s1'), level: 'error', text: 'unknown or malformed command: /plan' }])
+    expect(notices).toEqual([{ scope: sid('s1'), level: 'error', text: 'unknown command: /plan' }])
 
     notices.length = 0
     mode = 'reject'

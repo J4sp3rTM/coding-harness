@@ -116,11 +116,16 @@ it('assembles the shipped Web catalog, file-reference guidance, and confined acc
     agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
   })
   try {
-    expect(scaffold.ctx.commands.list(commandHandle.agent)).toContainEqual({
-      name: 'feedback',
-      description: 'record feedback about this session',
-      input: { hint: '<text>' },
-    })
+    expect(scaffold.ctx.commands.list(commandHandle.agent)).toEqual(expect.arrayContaining([
+      { name: 'context', description: 'Show the current context composition' },
+      { name: 'feedback', description: 'record feedback about this session', input: { hint: '<text>' } },
+      { name: 'help', description: 'List the available commands' },
+      { name: 'list-agents', description: 'List this session’s subagents' },
+      { name: 'rename', description: 'Rename this session', input: { hint: 'New title for this session' } },
+      { name: 'skills', description: 'List the available skills' },
+      { name: 'status', description: 'Show this session\'s status' },
+      { name: 'usage', description: 'Show provider token usage' },
+    ]))
   } finally {
     await commandHandle.dispose()
   }

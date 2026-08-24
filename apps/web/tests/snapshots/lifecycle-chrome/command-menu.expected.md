@@ -1,9 +1,20 @@
 - listbox "Trigger suggestions":
   - text: Commands
-  - option "compact Compact older conversation history" [selected]
+  - option "clear Clear the conversation context but keep the session" [selected]
+  - option "compact Compact older conversation history"
+  - option "context Show the current context composition"
   - option "export Download this Session log as a ZIP archive"
   - option "feedback record feedback about this session"
   - option "goal set or view the goal for a long-running task"
+  - option "help List the available commands"
+  - option "list-agents List this session’s subagents"
+  - option "login Sign in to a provider subscription (Claude Pro/Max, ChatGPT Plus/Pro)"
+  - option "logout Remove this machine's stored subscription sign-in for a provider"
   - option "permission Switch the permission preset (sandbox mode + approval policy)"
   - option "plan Enter or leave plan mode"
+  - option "rat Append a custom system prompt to this session (run with no text to remove it)"
+  - option "rename Rename this session"
+  - option "skills List the available skills"
+  - option "status Show this session's status"
+  - option "usage Show provider token usage"
   - option "model Select the model for this conversation"

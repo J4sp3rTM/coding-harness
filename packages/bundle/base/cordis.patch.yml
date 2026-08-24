@@ -327,6 +327,36 @@
       config:
         maxBytes: 65536
 
+    # Human `/help`: list the commands the receiving agent can resolve.
+    - id: command-help
+      name: '@deepseek-ai/dsh-command-help'
+
+    # Human `/status`: one-line session, agent-state, and context-size report.
+    - id: command-status
+      name: '@deepseek-ai/dsh-command-status'
+
+    # Human `/usage`: latest provider token consumption plus context pressure.
+    - id: command-usage
+      name: '@deepseek-ai/dsh-command-usage'
+
+    # Human `/context`: surface composition snapshot (nodes, heaviest node,
+    # request pressure).
+    - id: command-context
+      name: '@deepseek-ai/dsh-command-context'
+
+    # Human `/rename <title>`: pin an explicit session title; the input hint
+    # lets capable UIs collect the title on a bare invocation.
+    - id: command-rename
+      name: '@deepseek-ai/dsh-command-rename'
+
+    # Human `/skills`: name-sorted catalog of the skills the agent can load.
+    - id: command-skills
+      name: '@deepseek-ai/dsh-command-skills'
+
+    # Human `/list-agents`: the session's direct subagent children.
+    - id: command-list-agents
+      name: '@deepseek-ai/dsh-command-list-agents'
+
     - id: subagent
       name: '@deepseek-ai/dsh-subagent'
 

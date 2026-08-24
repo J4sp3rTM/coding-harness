@@ -7,6 +7,13 @@
     "docs/cordis-api/inherited.md",
     "docs/i18n/style-samples.md",
     "docs/i18n/terminology.md",
-    "docs/i18n/translation-prompt.md"
+    "docs/i18n/translation-prompt.md",
+    "packages/context/command-context/README.md",
+    "packages/interaction/command-help/README.md",
+    "packages/llm/command-usage/README.md",
+    "packages/session/command-rename/README.md",
+    "packages/session/command-status/README.md",
+    "packages/skill/command-skills/README.md",
+    "packages/subagent/command-list-agents/README.md"
   ]
 }

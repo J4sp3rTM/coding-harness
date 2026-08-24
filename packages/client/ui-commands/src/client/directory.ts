@@ -26,6 +26,8 @@ class Entry {
   commands: readonly CommandDescriptor[] = []
   /** Bumped at each pull start; only the latest pull may publish its outcome. */
   epoch = 0
+  /** Whether the latest pull is still in flight (a ready snapshot may remain servable). */
+  refreshing = false
   lastError: unknown
   waiters: Array<() => void> = []
 }
@@ -55,6 +57,18 @@ export class CommandDirectory {
     const entry = this.entries.get(sessionId)
     if (entry === undefined || entry.state !== 'ready') return undefined
     return entry.commands.find(c => c.name === name)
+  }
+
+  /**
+   * The session's hot catalog snapshot for read-only scans (unknown-command
+   * suggestions). Cold, pending, and failed entries read as empty — callers
+   * that need a guaranteed snapshot await {@link ensureReady} first.
+   * @param sessionId - session key.
+   * @returns the ready snapshot's descriptors, or an empty array.
+   */
+  list(sessionId: SessionId): readonly CommandDescriptor[] {
+    const entry = this.entries.get(sessionId)
+    return entry?.state === 'ready' ? entry.commands : []
   }
 
   /** Soft invalidation (commands-changed): background repull on every touched key; ready snapshots keep serving. */
@@ -94,6 +108,7 @@ export class CommandDirectory {
   async refresh(sessionId: SessionId): Promise<void> {
     const entry = this.entry(sessionId)
     const epoch = ++entry.epoch
+    entry.refreshing = true
     if (entry.state !== 'ready') entry.state = 'pending'
     try {
       const commands = await this.fetchCommands(sessionId)
@@ -107,7 +122,10 @@ export class CommandDirectory {
       entry.state = 'failed'
       entry.lastError = error
     } finally {
-      if (epoch === entry.epoch) notifyWaiters(entry)
+      if (epoch === entry.epoch) {
+        entry.refreshing = false
+        notifyWaiters(entry)
+      }
     }
   }
 
@@ -130,6 +148,26 @@ export class CommandDirectory {
         throw new Error(`command directory warmup failed: ${entry.lastError instanceof Error ? entry.lastError.message : String(entry.lastError)}`)
       }
       // Still pending (the awaited pull was superseded) → wait for the winner.
+    }
+  }
+
+  /**
+   * Strong-wait for the latest catalog generation. A ready stale snapshot stays
+   * available to menus through {@link list}, but Enter admission calls this
+   * method before declaring a syntactically valid name unknown.
+   * @param sessionId - session key.
+   * @param signal - attempt-scoped abort signal.
+   * @returns the latest winning snapshot.
+   */
+  async ensureCurrent(sessionId: SessionId, signal: AbortSignal): Promise<readonly CommandDescriptor[]> {
+    const entry = this.entry(sessionId)
+    while (true) {
+      if (entry.state === 'ready' && !entry.refreshing) return entry.commands
+      if (!entry.refreshing) void this.refresh(sessionId)
+      await settled(entry, signal)
+      if (entry.state === 'failed') {
+        throw new Error(`command directory refresh failed: ${entry.lastError instanceof Error ? entry.lastError.message : String(entry.lastError)}`)
+      }
     }
   }
 

@@ -56,6 +56,7 @@ describe('status and resolve (per key)', () => {
     const { dir } = bench()
     expect(dir.status(S1)).toBe('cold')
     expect(dir.resolve(S1, 'plan')).toBeUndefined()
+    expect(dir.list(S1)).toEqual([])
   })
 
   it('serves exact-name lookups once ready, undefined for unknown names', async () => {
@@ -67,6 +68,26 @@ describe('status and resolve (per key)', () => {
     expect(dir.status(S1)).toBe('ready')
     expect(dir.resolve(S1, 'goal')).toEqual(CMDS[1])
     expect(dir.resolve(S1, 'nope')).toBeUndefined()
+    expect(dir.list(S1)).toBe(CMDS)
+  })
+
+  it('serves a ready snapshot to menus while Enter waits for the in-flight refresh', async () => {
+    const { dir, pull } = bench()
+    const initial = dir.refresh(S1)
+    pull(S1, 0).resolve(CMDS)
+    await initial
+
+    const refreshing = dir.refresh(S1)
+    await expect(dir.ensureReady(S1, new AbortController().signal)).resolves.toBe(CMDS)
+    const current = dir.ensureCurrent(S1, new AbortController().signal)
+    let settled = false
+    void current.then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    pull(S1, 1).resolve(S2_CMDS)
+    await refreshing
+    await expect(current).resolves.toBe(S2_CMDS)
   })
 
   it('drops the snapshot and records failure on a failed pull', async () => {
@@ -76,6 +97,7 @@ describe('status and resolve (per key)', () => {
     await refreshed
     expect(dir.status(S1)).toBe('failed')
     expect(dir.resolve(S1, 'plan')).toBeUndefined()
+    expect(dir.list(S1)).toEqual([])
   })
 
   it('keys are isolated: one session catalog landing leaves another cold', async () => {
