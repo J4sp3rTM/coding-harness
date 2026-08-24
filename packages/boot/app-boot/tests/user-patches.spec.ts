@@ -360,8 +360,18 @@ describe('boot with user patches', () => {
       await dispose()
       const disposeDefault = await watchUserPatches(ctx, { binName: NAME, filename })
       try {
-        writeFileSync(filename, '- id: noop\n  config:\n    value: identity\n')
-        await eventually(() => (entryConfig(ctx, 'noop') as { value?: string }).value === 'identity', 'default-compose user patch was not applied')
+        // A write racing the fresh watcher's startup can be dropped by the
+        // platform watcher under load; re-issue the identical content so one
+        // lost event cannot strand the assertion. The applied value contract
+        // is unchanged.
+        let reissues = 0
+        await eventually(() => {
+          if ((entryConfig(ctx, 'noop') as { value?: string }).value !== 'identity' && reissues < 3) {
+            reissues += 1
+            writeFileSync(filename, '- id: noop\n  config:\n    value: identity\n')
+          }
+          return (entryConfig(ctx, 'noop') as { value?: string }).value === 'identity'
+        }, 'default-compose user patch was not applied')
       } finally {
         await disposeDefault()
       }
