@@ -122,7 +122,7 @@ Deferred/rejected during this overnight run: persona engineering-discipline text
 
 ### Additional operational findings at wrap-up
 
-- `scripts/release/process.ts` spawns `pnpm` bare via `spawnSync`, which cannot resolve the `.cmd` shim on Windows (`spawnSync pnpm ENOENT`); `release:dsh` therefore cannot run on a Windows host without a shell-free executable resolution (e.g., spawning `process.execPath` with the npm-global `pnpm/bin/pnpm.cjs`). Recorded for the next release-tooling pass; the bump itself was left to the standard post-merge flow.
+- `scripts/release/process.ts` originally spawned `pnpm` bare via `spawnSync`, which cannot resolve the `.cmd` shim on Windows (`spawnSync pnpm ENOENT`). The release helpers now invoke the Corepack pnpm entrypoint through `process.execPath` on Windows; `release:pack` completed locally with all 230 dsh tarballs.
 - Repository rules require pull requests for `master`; the work landed on branch `overnight-harness-improvement` (commits `c0b3f46110`, `07285ec6a5`, `8bee1b8391`).
 - Repo typecheck surfaced two latent test-type errors in harness-eval specs; fixed in `8bee1b8391`.
 
