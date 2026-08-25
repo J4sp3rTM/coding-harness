@@ -3,6 +3,8 @@
     ".agents/notes/AGENTS.md",
     ".agents/notes/implemented/AGENTS.md",
     ".agents/notes/implemented/CLAUDE.md",
+    "BENCHMARKS.md",
+    "README.md",
     "assets/branding/README.md",
     "docs/AGENTS.md",
     "docs/cordis-api/inherited.md",
