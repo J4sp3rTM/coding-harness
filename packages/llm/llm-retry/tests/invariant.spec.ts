@@ -200,7 +200,7 @@ describe('llm-retry invariants', () => {
 
     expect(() => {
       session.append('llm/retry', { turn: 1, step: 1, ...always, retry: 2 })
-    }).toThrow(/must equal provider policy retry 1/)
+    }).toThrow(/must equal policy retry 1/)
   })
 
   it('binds retry numbering to the provider policy and resets it for a new step', async () => {
@@ -209,7 +209,7 @@ describe('llm-retry invariants', () => {
     mismatch.append('llm/retry', { turn: 1, step: 1, ...normal })
     expect(() => {
       mismatch.append('llm/retry', { turn: 1, step: 1, ...normal, retry: 1 })
-    }).toThrow(/must equal provider policy retry 2/)
+    }).toThrow(/must equal policy retry 2/)
 
     const reset = openStep(ctx, 'retry-invariant-reset')
     reset.append('llm/retry', { turn: 1, step: 1, ...normal })

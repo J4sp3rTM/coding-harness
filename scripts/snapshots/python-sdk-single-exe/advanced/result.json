@@ -2784,7 +2784,7 @@
           "seq": 3,
           "time": 0,
           "data": {
-            "version": 2,
+            "version": 3,
             "mode": "one-shot",
             "provider": "spawn",
             "label": "Check direct child"
@@ -3489,7 +3489,7 @@
           "seq": 3,
           "time": 0,
           "data": {
-            "version": 2,
+            "version": 3,
             "mode": "one-shot",
             "provider": "spawn"
           }

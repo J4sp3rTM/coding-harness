@@ -546,7 +546,7 @@ describe('prompt and cancel errors', () => {
     const { api, session } = makeSession()
     session.handleBlank(true)
     api.onPrompt = () => Promise.resolve(err({ code: 'agent-busy', message: 'busy', details: { reason: 'x' } }))
-    const result = await session.prompt([{ type: 'text', text: '失败的' }], 'queue')
+    const result = await session.prompt([{ type: 'text', text: 'Failed的' }], 'queue')
     expect(result.ok).toBe(false)
     expect(session.getSnapshot().promptError).toMatchObject({ op: 'send', error: { code: 'agent-busy' } })
     // Failed first prompt: composer + error strip is the retry surface —
@@ -1000,7 +1000,7 @@ describe('reference stability (the memo contract)', () => {
     const settledKey = before.chat.order[0]!
     const settledNode = before.chat.nodes.get(settledKey)
     feed(ev.chunkStart(9, 1))
-    feed(ev.chunkText(10, 1, '与工具无关的流式'))
+    feed(ev.chunkText(10, 1, '与Tools无关的流式'))
     const after = session.getSnapshot()
     expect(after).not.toBe(before)
     expect(after.runningCalls).toBe(before.runningCalls)

@@ -483,8 +483,7 @@
     },
     "packages/llm/llm-oauth": {
       "entry": [
-        "tests/**/*.spec.ts",
-        "tests/**/*.e2e.ts"
+        "tests/**/*.spec.ts"
       ],
       "project": [
         "src/**/*.ts",
@@ -493,18 +492,21 @@
     },
     "packages/llm/llm-oauth-local": {
       "entry": [
-        "tests/**/*.spec.ts",
-        "tests/**/*.e2e.ts"
+        "tests/**/*.spec.ts"
       ],
       "project": [
         "src/**/*.ts",
         "tests/**/*.ts"
       ]
     },
+    "packages/host/electron-carrier": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
     "packages/llm/command-login": {
       "entry": [
-        "tests/**/*.spec.ts",
-        "tests/**/*.e2e.ts"
+        "tests/**/*.spec.ts"
       ],
       "project": [
         "src/**/*.ts",

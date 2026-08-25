@@ -1,4 +1,5 @@
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { RetryId } from '@deepseek-ai/dsh-llm-retry'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import {
@@ -42,6 +43,20 @@ function appendRound(session: Session, turn: number, content = renderGoalRoundPr
     content, source,
   }), { surfaceOp: 'append' })
   session.append('turn/end', { turn, reason: { kind: 'completed' } })
+}
+
+function appendGoalRetry(session: Session, turn: number): void {
+  session.append('llm/retry', {
+    retryId: RetryId(`goal-retry-${turn}`),
+    turn,
+    step: 1,
+    provider: 'mock',
+    mode: 'always',
+    policyKey: '["contribution","goal-round-driver","always",1,1,0]',
+    retry: 1,
+    delayMs: 1,
+    failure: { message: 'temporary provider failure', code: 'PI_AI_ERROR' },
+  })
 }
 
 async function mount(sessionFirst = false): Promise<{ ctx: Context; session: Session }> {
@@ -110,6 +125,35 @@ describe('goal-round-driver prompt invariants', () => {
         source,
       }), { surfaceOp: 'append' })
     }).toThrow(expect.objectContaining<Partial<InvariantError>>({
+      packageName: '@deepseek-ai/dsh-goal-round-driver',
+    }))
+  })
+
+  it('accepts a contributed retry only inside its current admitted goal round', async () => {
+    const { session } = await mount()
+    appendChange(session)
+    const source = { kind: 'goal', goalId: change.goal.id, revision: 1, round: 1 } as const
+    session.append('turn/start', { turn: 2 })
+    session.append('step/start', { turn: 2, step: 1 })
+    session.append('user/message', createUserMessage({
+      content: renderGoalRoundPrompt(view(0), 1),
+      source,
+    }), { surfaceOp: 'append' })
+
+    expect(() => { appendGoalRetry(session, 2) }).not.toThrow()
+  })
+
+  it('rejects a contributed retry without an admitted goal round', async () => {
+    const { session } = await mount()
+    appendChange(session)
+    session.append('turn/start', { turn: 2 })
+    session.append('step/start', { turn: 2, step: 1 })
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'ordinary request' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+
+    expect(() => { appendGoalRetry(session, 2) }).toThrow(expect.objectContaining<Partial<InvariantError>>({
       packageName: '@deepseek-ai/dsh-goal-round-driver',
     }))
   })

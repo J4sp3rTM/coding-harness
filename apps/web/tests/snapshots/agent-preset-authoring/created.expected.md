@@ -1,24 +1,24 @@
-- dialog "设置":
+- dialog "Settings":
   - navigation:
-    - text: 设置
-    - button "通用设置":
+    - text: Settings
+    - button "General":
       - img
-      - text: 通用设置
-    - button "模型":
+      - text: General
+    - button "Model":
       - img
-      - text: 模型
+      - text: Model
     - button "插件":
       - img
       - text: 插件
     - button "Agent 预设":
       - img
       - text: Agent 预设
-  - button "打开配置文件"
-  - button "关闭":
+  - button "Open configuration file"
+  - button "Close":
     - img
-    - text: 关闭
+    - text: Close
   - heading "Agent 预设" [level=2]
-  - paragraph: 预设即一个会话的 Agent 所运行的插件组装 —— 它的工具、提示词与能力。复制一份既有预设改成自己的，或用「创造模式」让 Agent 帮你创建。
+  - paragraph: 预设即一个Sessions的 Agent 所运行的插件组装 —— 它的Tools、提示词与能力。复制一份既有预设改成自己的，或用「创造模式」让 Agent 帮你创建。
   - heading "内置" [level=3]
   - list:
     - listitem:
@@ -33,7 +33,7 @@
         - text: 复制
     - listitem:
       - 'button "设为默认: PTC 模式"':
-        - text: PTC 模式 内置 具备标准模式的全部能力，并通过 Code Mode SDK 呈现工具，让模型用一个 TypeScript 程序组合多步操作。
+        - text: PTC 模式 内置 具备标准模式的全部能力，并通过 Code Mode SDK 呈现Tools，让Model用一个 TypeScript 程序组合多步操作。
         - code: code
       - 'button "查看: PTC 模式"':
         - img
@@ -43,7 +43,7 @@
         - text: 复制
     - listitem:
       - 'button "设为默认: 极简模式"':
-        - text: 极简模式 内置 仅提供持久 bash 与 str_replace_editor 的双工具编码 Agent。
+        - text: 极简模式 内置 仅提供持久 bash 与 str_replace_editor 的双Tools编码 Agent。
         - code: minimal
       - 'button "查看: 极简模式"':
         - img
@@ -65,7 +65,7 @@
   - list:
     - listitem:
       - 'button "设为默认: 我的模式"':
-        - text: 我的模式 自定义 仅提供持久 bash 与 str_replace_editor 的双工具编码 Agent。
+        - text: 我的模式 自定义 仅提供持久 bash 与 str_replace_editor 的双Tools编码 Agent。
         - code: my-agent
       - 'button "查看路径: 我的模式"':
         - img

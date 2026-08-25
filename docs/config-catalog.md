@@ -656,6 +656,32 @@ export interface Config {
 
 Source: [`packages/goal/goal/src/index.ts:116`](../packages/goal/goal/src/index.ts)
 
+<a id="deepseek-aidsh-goal-round-driver"></a>
+
+## `@deepseek-ai/dsh-goal-round-driver`
+
+Requires: `agents` · `goals` · `sessions` · `llmRetry`
+
+```ts config-catalog
+/** Configuration for continuing an armed goal after a transient request error. */
+export interface Config {
+  /** Same-step recovery policy used only while an armed goal round is active. */
+  transientRetry?: {
+    /**
+     * Failure codes retried without another goal round; defaults to EMPTY_RESPONSE,
+     * PI_AI_ERROR, RATE_LIMIT, SERVER, TIMEOUT, and TRANSPORT.
+     */
+    retryableCodes?: string[]
+    /** Backoff defaults to 500 ms initial, 10 seconds maximum, and 0.1 jitter. */
+    backoff?: BackoffConfig
+  }
+}
+```
+
+Depends on: [`BackoffConfig`](../packages/llm/llm/src/index.ts)
+
+Source: [`packages/goal/goal-round-driver/src/index.ts:34`](../packages/goal/goal-round-driver/src/index.ts)
+
 <a id="deepseek-aidsh-headless"></a>
 
 ## `@deepseek-ai/dsh-headless`
@@ -1223,7 +1249,7 @@ Requires: `agents`
 export type Config = Readonly<Record<string, never>>
 ```
 
-Source: [`packages/llm/llm-retry/src/index.ts:24`](../packages/llm/llm-retry/src/index.ts)
+Source: [`packages/llm/llm-retry/src/index.ts:28`](../packages/llm/llm-retry/src/index.ts)
 
 <a id="deepseek-aidsh-lsp-stdio"></a>
 
@@ -3145,6 +3171,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-skill` ([`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-subagent` ([`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-theme` ([`packages/client/ui-theme/src/index.ts`](../packages/client/ui-theme/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-theme-green` ([`packages/client/ui-theme-green/src/index.ts`](../packages/client/ui-theme-green/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-tool` ([`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-trajectory` ([`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-user-questions` ([`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts))
@@ -3152,14 +3179,20 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-workspace` ([`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts))
 - `@deepseek-ai/dsh-command-clear` — requires `commands` · `sessions` ([`packages/session/command-clear/src/index.ts`](../packages/session/command-clear/src/index.ts))
 - `@deepseek-ai/dsh-command-compact` — requires `commands` · `compaction` ([`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts))
+- `@deepseek-ai/dsh-command-context` — requires `commands` · `tokenMeter` ([`packages/context/command-context/src/index.ts`](../packages/context/command-context/src/index.ts))
 - `@deepseek-ai/dsh-command-feedback` — requires `commands` ([`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts))
 - `@deepseek-ai/dsh-command-goal` — requires `commands` · `goals` ([`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts))
+- `@deepseek-ai/dsh-command-help` — requires `commands` ([`packages/interaction/command-help/src/index.ts`](../packages/interaction/command-help/src/index.ts))
+- `@deepseek-ai/dsh-command-list-agents` — requires `commands` · `subagents` ([`packages/subagent/command-list-agents/src/index.ts`](../packages/subagent/command-list-agents/src/index.ts))
 - `@deepseek-ai/dsh-command-login` — requires `commands` · `llmOAuth` · `userQuestions` ([`packages/llm/command-login/src/index.ts`](../packages/llm/command-login/src/index.ts))
+- `@deepseek-ai/dsh-command-rename` — requires `commands` · `sessionTitle` ([`packages/session/command-rename/src/index.ts`](../packages/session/command-rename/src/index.ts))
+- `@deepseek-ai/dsh-command-skills` — requires `commands` · `skills` ([`packages/skill/command-skills/src/index.ts`](../packages/skill/command-skills/src/index.ts))
+- `@deepseek-ai/dsh-command-status` — requires `commands` ([`packages/session/command-status/src/index.ts`](../packages/session/command-status/src/index.ts))
+- `@deepseek-ai/dsh-command-usage` — requires `commands` · `tokenMeter` ([`packages/llm/command-usage/src/index.ts`](../packages/llm/command-usage/src/index.ts))
 - `@deepseek-ai/dsh-commands` ([`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts))
 - `@deepseek-ai/dsh-cordis-client-runner` ([`packages/extensions/cordis-client-runner/src/index.ts`](../packages/extensions/cordis-client-runner/src/index.ts))
 - `@deepseek-ai/dsh-fs-e2b` — requires `e2b` ([`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts))
 - `@deepseek-ai/dsh-fs-observation-policy` ([`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts))
-- `@deepseek-ai/dsh-goal-round-driver` — requires `agents` · `goals` · `sessions` ([`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-auto` — requires `webServer` · `loader` ([`packages/host/directory-picker-auto/src/index.ts`](../packages/host/directory-picker-auto/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-native` ([`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts))
 - `@deepseek-ai/dsh-host-electron-carrier` ([`packages/host/electron-carrier/src/index.ts`](../packages/host/electron-carrier/src/index.ts))

@@ -111,10 +111,10 @@ function validateRetry(
     && prior.data.policyKey === policyKey)
   const expectedRetry = (priorPolicyRetry?.data.retry ?? 0) + 1
   if (retry !== expectedRetry) {
-    fail(`llm/retry retry ${retry} must equal provider policy retry ${expectedRetry}`)
+    fail(`llm/retry retry ${retry} must equal policy retry ${expectedRetry}`)
   }
   if (priorPolicyRetry !== undefined && priorPolicyRetry.data.retryId !== retryId) {
-    fail('llm/retry must preserve retryId across one provider-policy chain')
+    fail('llm/retry must preserve retryId across one policy chain')
   }
   if (priorPolicyRetry === undefined && history.some(prior =>
     (prior.type === 'llm/retry' || prior.type === 'llm/retry-started')

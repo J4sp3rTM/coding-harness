@@ -33,6 +33,8 @@ const goalScenarioDir = join(snapshotsDir, 'goal-tools')
 const goalConfigPath = fileURLToPath(new URL('../goal.cordis.snapshot.yml', import.meta.url))
 const retryScenarioDir = join(snapshotsDir, 'provider-retry')
 const retryConfigPath = fileURLToPath(new URL('../retry.cordis.snapshot.yml', import.meta.url))
+const goalRetryScenarioDir = join(snapshotsDir, 'goal-retry')
+const goalRetryConfigPath = fileURLToPath(new URL('../goal-retry.cordis.snapshot.yml', import.meta.url))
 const compactionScenarioDir = join(snapshotsDir, 'compaction-recovery')
 const compactionSessionFixture = join(compactionScenarioDir, 'session.jsonl')
 const compactionStreamExpected = join(compactionScenarioDir, 'stream-json.expected.jsonl')
@@ -50,6 +52,7 @@ const settlementConfigPath = fileURLToPath(new URL('../subagent-settlement.cordi
 const startupFailureConfigPath = fileURLToPath(new URL('./fixtures/startup-activation-error/cordis.yml', import.meta.url))
 const startupFailureExpected = join(snapshotsDir, 'startup-activation-error', 'stderr.expected.txt')
 const binScript = fileURLToPath(new URL('./fixtures/headless-driver.ts', import.meta.url))
+const goalRetryBinScript = fileURLToPath(new URL('./fixtures/goal-retry-driver.ts', import.meta.url))
 const dshBinScript = fileURLToPath(new URL('../../../apps/cli/src/bin.ts', import.meta.url))
 const tsconfigPath = fileURLToPath(new URL('../../../tsconfig.json', import.meta.url))
 const reasoningConfigPath = fileURLToPath(new URL('./fixtures/cli.cordis.yml', import.meta.url))
@@ -325,6 +328,61 @@ describe('headless stream-json snapshots', () => {
 
     expect(result.stderr).toBe('')
     const normalized = normalizeHeadlessStream(result.stdout, runCwd)
+    if (refreshing) await writeFile(streamExpected, normalized)
+    expect(normalized).toBe(await readFile(streamExpected, 'utf8'))
+  }, LOADER_SMOKE_TEST_TIMEOUT_MS)
+
+  it('keeps an active goal running after repeated PI failures', async () => {
+    const prompt = await scenarioPrompt(goalRetryScenarioDir, 'goal-retry')
+    const streamExpected = join(goalRetryScenarioDir, 'stream-json.expected.jsonl')
+    let runCwd = ''
+    const result = await runLoaderSmoke({
+      label: 'goal retry headless stream-json snapshot',
+      tempDirPrefix: 'headless-snapshot-goal-retry-',
+      binScript: goalRetryBinScript,
+      libBinScript: goalRetryBinScript,
+      configPath: goalRetryConfigPath,
+      binArgs: [goalRetryConfigPath, prompt],
+      tsconfigPath,
+      env: {
+        DSH_SNAPSHOT: 'replay',
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' '),
+      },
+      prepare: (cwd) => { runCwd = cwd },
+      inspect: async (cwd) => {
+        const logs = await persistedLogs(cwd)
+        expect(logs).toHaveLength(1)
+        const records = parseJsonl(logs[0]?.content ?? '')
+        const retries = records.filter(record => record.type === 'llm/retry')
+        expect(retries).toHaveLength(2)
+        expect(retries.map(record => record.data)).toEqual([
+          expect.objectContaining({
+            mode: 'always',
+            policyKey: '["contribution","goal-round-driver","always",1,1,0]',
+            retry: 1,
+            failure: { message: 'snapshot pi transport failure', code: 'PI_AI_ERROR' },
+          }),
+          expect.objectContaining({
+            mode: 'always',
+            policyKey: '["contribution","goal-round-driver","always",1,1,0]',
+            retry: 2,
+            failure: { message: 'snapshot pi transport failure', code: 'PI_AI_ERROR' },
+          }),
+        ])
+        expect(records.filter(record => record.type === 'goal/change').at(-1)?.data).toMatchObject({
+          operation: 'block',
+          goal: {
+            blockedReason: {
+              code: 'round-limit',
+              message: 'Goal reached its configured limit of 1 rounds.',
+            },
+          },
+        })
+      },
+    })
+
+    expect(result.stderr).toBe('')
+    const normalized = normalizeGoalStream(result.stdout, runCwd)
     if (refreshing) await writeFile(streamExpected, normalized)
     expect(normalized).toBe(await readFile(streamExpected, 'utf8'))
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)

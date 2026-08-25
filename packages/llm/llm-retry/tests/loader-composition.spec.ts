@@ -115,4 +115,5 @@ describe('real Loader composition', () => {
       content: [{ type: 'text', text: 'recovered' }],
     })
   })
+
 })

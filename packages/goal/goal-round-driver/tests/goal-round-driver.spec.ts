@@ -6,8 +6,9 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import GoalService, { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
-import { createUserMessage, LlmAdapter, LlmError  } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, LlmAdapter, LlmError, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, ResolvedRetryPolicy, RetryPolicyConfig, StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRetry from '@deepseek-ai/dsh-llm-retry'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import * as goalSession from '../src/index.ts'
@@ -18,8 +19,15 @@ type ScriptEntry = StreamChunk[] | Error | 'hang' | ((options: GenerateOptions) 
 class ScriptedAdapter extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
 
-  constructor(private readonly script: ScriptEntry[]) {
+  constructor(
+    private readonly script: ScriptEntry[],
+    private readonly retryPolicy?: ResolvedRetryPolicy,
+  ) {
     super()
+  }
+
+  override providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined {
+    return this.retryPolicy
   }
 
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -85,14 +93,24 @@ afterEach(async () => {
 })
 
 /** Mount a real loop with only its model scripted. */
-async function harness(script: ScriptEntry[]): Promise<Harness> {
+async function harness(
+  script: ScriptEntry[],
+  driverConfig: goalSession.Config = {},
+  providerRetryPolicy?: RetryPolicyConfig,
+): Promise<Harness> {
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
   await ctx.plugin(GoalService)
-  const driver = await ctx.plugin(goalSession)
+  await ctx.plugin(LlmRetry)
+  const driver = await ctx.plugin(goalSession, driverConfig)
   await ctx.plugin(AgentLoop, { agents: [] })
-  const adapter = new ScriptedAdapter(script)
+  const adapter = new ScriptedAdapter(
+    script,
+    providerRetryPolicy === undefined
+      ? undefined
+      : resolveRetryPolicy(providerRetryPolicy, 'goal-round-driver test provider retryPolicy'),
+  )
   ctx.llm.registerAdapter(['mock'], adapter)
   const agent = ctx.agentLoop.create(SessionId(`goal-session-${Math.random()}`), {
     provider: 'mock',
@@ -214,6 +232,7 @@ describe('same-session goal driving', () => {
     contexts.push(ctx)
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(GoalService)
+    await ctx.plugin(LlmRetry)
     await ctx.plugin(AgentLoop, { agents: [] })
     const adapter = new ScriptedAdapter([textResponse('after resume')])
     ctx.llm.registerAdapter(['mock'], adapter)
@@ -231,8 +250,8 @@ describe('same-session goal driving', () => {
   })
 
   it.each([
-    ['rate limit', new LlmError('slow down', 'RATE_LIMIT')],
     ['request error', new Error('provider broke')],
+    ['auth failure', new LlmError('bad credentials', 'AUTH')],
     ['max tokens', maxTokensResponse('unfinished')],
   ] as const)('disarms automatic continuation after a %s', async (_label, response) => {
     const test = await harness([response])
@@ -243,6 +262,151 @@ describe('same-session goal driving', () => {
 
     expect(goal).toMatchObject({ roundsStarted: 1, activation: 'disarmed' })
     expect(test.adapter.requests).toHaveLength(1)
+  })
+
+  it('continues an active goal after a transient provider error without a human wakeup', async () => {
+    const test = await harness([
+      new LlmError('provider temporarily failed', 'PI_AI_ERROR'),
+      textResponse('recovered and finished'),
+      textResponse('second round completed'),
+    ], { transientRetry: { backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 } } })
+    test.ctx.goals.create(test.agent, { objective: 'recover automatically', maxGoalRounds: 2 })
+
+    const goal = await waitForGoal(test.ctx, test.agent, current => current?.phase === 'blocked')
+
+    expect(goal).toMatchObject({ phase: 'blocked', roundsStarted: 2, activation: 'disarmed' })
+    expect(test.adapter.requests).toHaveLength(3)
+  })
+
+  it('uses finite provider retries before the unbounded goal fallback for a 429', async () => {
+    const test = await harness([
+      new LlmError('rate limited once', 'RATE_LIMIT', { status: 429, providerRetryAfterMs: 1 }),
+      new LlmError('rate limited twice', 'RATE_LIMIT', { status: 429, providerRetryAfterMs: 1 }),
+      textResponse('recovered after both policies'),
+    ], {
+      transientRetry: { backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 } },
+    }, {
+      mode: 'normal',
+      maxRetries: 1,
+      retryableCodes: ['RATE_LIMIT'],
+      backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 },
+    })
+    test.ctx.goals.create(test.agent, { objective: 'survive a 429', maxGoalRounds: 1 })
+
+    const goal = await waitForGoal(test.ctx, test.agent, current => current?.phase === 'blocked')
+    const retries = test.agent.session.events.filter(event => event.type === 'llm/retry')
+
+    expect(goal).toMatchObject({ phase: 'blocked', roundsStarted: 1, activation: 'disarmed' })
+    expect(test.adapter.requests).toHaveLength(3)
+    expect(retries.map(event => ({ mode: event.data.mode, policyKey: event.data.policyKey }))).toEqual([
+      { mode: 'normal', policyKey: '["normal",1,["RATE_LIMIT"],1,1,0]' },
+      {
+        mode: 'always',
+        policyKey: '["contribution","goal-round-driver","always",1,1,0]',
+      },
+    ])
+  })
+
+  it('leaves an always provider policy as the only retry owner', async () => {
+    const test = await harness([
+      new LlmError('provider always retries this', 'PI_AI_ERROR'),
+      textResponse('provider retry recovered'),
+    ], {
+      transientRetry: { backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 } },
+    }, {
+      mode: 'always',
+      backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 },
+    })
+    test.ctx.goals.create(test.agent, { objective: 'preserve provider ownership', maxGoalRounds: 1 })
+
+    await waitForGoal(test.ctx, test.agent, current => current?.phase === 'blocked')
+    const retries = test.agent.session.events.filter(event => event.type === 'llm/retry')
+
+    expect(test.adapter.requests).toHaveLength(2)
+    expect(retries).toHaveLength(1)
+    expect(retries[0]?.data.policyKey).toBe('["always",1,1,0]')
+  })
+
+  it('cancels a provider-owned backoff when the active goal is paused', async () => {
+    const test = await harness([
+      new LlmError('provider is rate limited', 'RATE_LIMIT', { status: 429 }),
+      textResponse('must not run'),
+    ], {}, {
+      mode: 'normal',
+      maxRetries: 1,
+      retryableCodes: ['RATE_LIMIT'],
+      backoff: { initialDelayMs: 10_000, maxDelayMs: 10_000, jitterRatio: 0 },
+    })
+    const created = test.ctx.goals.create(test.agent, { objective: 'pause provider recovery', maxGoalRounds: 2 })
+    await vi.waitFor(() => {
+      expect(test.agent.session.events.some(event =>
+        event.type === 'llm/retry' && event.data.mode === 'normal')).toBe(true)
+    })
+
+    test.ctx.goals.pause(test.agent, created)
+    await test.agent.whenIdle()
+
+    expect(test.ctx.goals.get(test.agent)).toMatchObject({ phase: 'paused', activation: 'disarmed' })
+    expect(test.adapter.requests).toHaveLength(1)
+    expect(test.agent.session.events.some(event => event.type === 'llm/retry-started')).toBe(false)
+  })
+
+  it('cancels the goal fallback when same-turn steering arrives', async () => {
+    const test = await harness([
+      new LlmError('provider temporarily failed', 'PI_AI_ERROR'),
+      textResponse('must not run'),
+    ], { transientRetry: { backoff: { initialDelayMs: 10_000, maxDelayMs: 10_000, jitterRatio: 0 } } })
+    test.ctx.goals.create(test.agent, { objective: 'yield to steering', maxGoalRounds: 2 })
+    await vi.waitFor(() => {
+      expect(test.agent.session.events.some(event => event.type === 'llm/retry')).toBe(true)
+    })
+
+    test.agent.steer(createUserMessage({
+      content: [{ type: 'text', text: 'stop retrying and follow this instead' }],
+      source: { kind: 'user' },
+    }))
+    await test.agent.whenIdle()
+
+    expect(test.ctx.goals.get(test.agent)).toMatchObject({ phase: 'active', activation: 'disarmed' })
+    expect(test.adapter.requests).toHaveLength(1)
+    expect(test.agent.inbox.nextStep).toHaveLength(1)
+  })
+
+  it('cancels a transient retry wait and pauses the goal', async () => {
+    const test = await harness([
+      new LlmError('provider temporarily failed', 'RATE_LIMIT'),
+    ], { transientRetry: { backoff: { initialDelayMs: 10_000, maxDelayMs: 10_000, jitterRatio: 0 } } })
+    test.ctx.goals.create(test.agent, { objective: 'cancel recovery', maxGoalRounds: 2 })
+    await vi.waitFor(() => {
+      expect(test.agent.session.events.some(event => event.type === 'llm/retry')).toBe(true)
+    })
+
+    test.agent.cancel({ kind: 'user' })
+    await test.agent.whenIdle()
+
+    expect(test.ctx.goals.get(test.agent)).toMatchObject({ phase: 'paused', activation: 'disarmed' })
+    expect(test.adapter.requests).toHaveLength(1)
+  })
+
+  it('disposes while waiting for a transient retry without leaving a timer or request', async () => {
+    const test = await harness([
+      new LlmError('provider temporarily failed', 'PI_AI_ERROR'),
+    ], { transientRetry: { backoff: { initialDelayMs: 10_000, maxDelayMs: 10_000, jitterRatio: 0 } } })
+    test.ctx.goals.create(test.agent, { objective: 'dispose recovery', maxGoalRounds: 2 })
+    await vi.waitFor(() => {
+      expect(test.agent.session.events.some(event => event.type === 'llm/retry')).toBe(true)
+    })
+
+    await test.driver.dispose()
+
+    expect(test.ctx.goals.get(test.agent)).toMatchObject({ phase: 'active', activation: 'disarmed' })
+    expect(test.adapter.requests).toHaveLength(1)
+  })
+
+  it('rejects an invalid transient retry code configuration', async () => {
+    await expect(harness([], {
+      transientRetry: { retryableCodes: [''] },
+    })).rejects.toThrow('transientRetry.retryableCodes')
   })
 
   it('maps a downstream step rejection to blocked without entering the round', async () => {

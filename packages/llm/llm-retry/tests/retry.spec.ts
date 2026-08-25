@@ -113,8 +113,8 @@ async function harness(
   beforeRetry?.(ctx)
   adapter.configureRetryPolicies(policies)
   const retryFiber = await ctx.plugin(Object.assign((inner: Context) => {
-    retry.apply(inner, {}, internals)
-  }, { inject: retry.inject }))
+    void new retry.LlmRetry(inner, {}, internals)
+  }, { inject: ['agents'] }))
   await ctx.plugin(AgentLoop, { agents: [] })
   const disposeAdapter = ctx.llm.registerAdapter(['mock', 'other'], adapter)
   return { ctx, retryFiber, disposeAdapter }
@@ -1022,17 +1022,148 @@ describe('provider-routed retry policy', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('runs one contributed fallback only after the finite provider budget is exhausted', async () => {
+    const adapter = new ScriptedAdapter([
+      new LlmError('provider retry', 'SERVER'),
+      new LlmError('fallback retry', 'SERVER'),
+      textResponse('recovered'),
+    ])
+    ;({ ctx: context } = await harness(adapter, {
+      mock: normalConfig({
+        maxRetries: 1,
+        retryableCodes: ['SERVER'],
+        backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 },
+      }),
+    }))
+    const fallback = resolveRetryPolicy(alwaysConfig({
+      initialDelayMs: 1,
+      maxDelayMs: 1,
+      jitterRatio: 0,
+    }), 'retry test fallback')
+    context.llmRetry.register({
+      id: 'test-fallback',
+      resolve: ({ failure }) => failure.code === 'SERVER' ? { policy: fallback } : undefined,
+    })
+    const agent = context.agentLoop.create(SessionId('retry-contributed-fallback'), {
+      provider: 'mock',
+      model: 'mock',
+    })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+
+    expect(adapter.requests).toHaveLength(3)
+    expect(agent.session.events.filter(event => event.type === 'llm/retry').map(event => ({
+      mode: event.data.mode,
+      policyKey: event.data.policyKey,
+    }))).toEqual([
+      { mode: 'normal', policyKey: '["normal",1,["SERVER"],1,1,0]' },
+      { mode: 'always', policyKey: '["contribution","test-fallback","always",1,1,0]' },
+    ])
+  })
+
+  it('supports a finite contributed policy with its own chain identity', async () => {
+    const adapter = new ScriptedAdapter([
+      new LlmError('special transient', 'SPECIAL_TRANSIENT'),
+      textResponse('recovered'),
+    ])
+    ;({ ctx: context } = await harness(adapter))
+    const fallback = resolveRetryPolicy(normalConfig({
+      maxRetries: 1,
+      retryableCodes: ['SPECIAL_TRANSIENT'],
+      backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 },
+    }), 'retry test finite fallback')
+    context.llmRetry.register({ id: 'finite-fallback', resolve: () => ({ policy: fallback }) })
+    const agent = context.agentLoop.create(SessionId('retry-finite-contribution'), {
+      provider: 'mock',
+      model: 'mock',
+    })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+
+    expect(adapter.requests).toHaveLength(2)
+    expect(agent.session.events.find(event => event.type === 'llm/retry')).toMatchObject({
+      type: 'llm/retry',
+      data: {
+        mode: 'normal',
+        policyKey: '["contribution","finite-fallback","normal",1,["SPECIAL_TRANSIENT"],1,1,0]',
+      },
+    })
+  })
+
+  it('applies a contributed cancellation signal to provider-owned backoff', async () => {
+    const adapter = new ScriptedAdapter([
+      new LlmError('provider retry', 'SERVER'),
+      textResponse('must not run'),
+    ])
+    ;({ ctx: context } = await harness(adapter, {
+      mock: normalConfig({ backoff: { initialDelayMs: 10_000, maxDelayMs: 10_000, jitterRatio: 0 } }),
+    }))
+    const abort = new AbortController()
+    context.llmRetry.register({ id: 'test-cancellation', resolve: () => ({ signal: abort.signal }) })
+    context.llmRetry.register({ id: 'ineligible-fallback', resolve: () => undefined })
+    const agent = context.agentLoop.create(SessionId('retry-contributed-cancellation'), {
+      provider: 'mock',
+      model: 'mock',
+    })
+    const scheduled = waitForRetry(context, agent, 1)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await scheduled
+
+    abort.abort(new Error('contributor no longer admits retry'))
+    await agent.whenIdle()
+
+    expect(adapter.requests).toHaveLength(1)
+    expect(agent.session.events.some(event => event.type === 'llm/retry-started')).toBe(false)
+  })
+
+  it('rejects ambiguous or invalid fallback registrations', async () => {
+    const adapter = new ScriptedAdapter([new LlmError('special transient', 'SPECIAL_TRANSIENT')])
+    ;({ ctx: context } = await harness(adapter))
+    const fallback = resolveRetryPolicy(alwaysConfig({
+      initialDelayMs: 1,
+      maxDelayMs: 1,
+      jitterRatio: 0,
+    }), 'retry test ambiguous fallback')
+    const runtime = context.llmRetry
+    expect(() => {
+      runtime.register({ id: '', resolve: () => undefined })
+    }).toThrow('contributor id must be non-empty')
+    const disposeFirst = runtime.register({ id: 'duplicate', resolve: () => ({ policy: fallback }) })
+    expect(() => {
+      runtime.register({ id: 'duplicate', resolve: () => ({ policy: fallback }) })
+    }).toThrow('already registered')
+    disposeFirst()
+    runtime.register({ id: 'duplicate', resolve: () => ({ policy: fallback }) })
+    runtime.register({ id: 'second', resolve: () => ({ policy: fallback }) })
+    const agent = context.agentLoop.create(SessionId('retry-ambiguous-contribution'), {
+      provider: 'mock',
+      model: 'mock',
+    })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+
+    expect(adapter.requests).toHaveLength(1)
+    expect(agent.session.events.some(event => event.type === 'llm/retry')).toBe(false)
+    expect(agent.session.events.find(event => event.type === 'turn/end')).toMatchObject({
+      type: 'turn/end',
+      data: { reason: { kind: 'error', error: { code: 'UNKNOWN' } } },
+    })
+  })
+
   it('rejects retry policy configured on the executor instead of a provider', () => {
     expectTypeOf<{}>().toExtend<retry.Config>()
     expectTypeOf<{ retryPolicy: { mode: 'always' } }>().not.toExtend<retry.Config>()
     expect(() => {
-      retry.apply(new Context(), { retryPolicy: { mode: 'always' } } as unknown as retry.Config)
+      void new retry.LlmRetry(new Context(), { retryPolicy: { mode: 'always' } } as unknown as retry.Config)
     }).toThrow(/retryPolicy belongs under each provider/)
   })
 
   it('rejects unknown executor config', () => {
     expect(() => {
-      retry.apply(new Context(), { retryPolciy: {} } as unknown as retry.Config)
+      void new retry.LlmRetry(new Context(), { retryPolciy: {} } as unknown as retry.Config)
     }).toThrow(/unknown key "retryPolciy"/)
   })
 })

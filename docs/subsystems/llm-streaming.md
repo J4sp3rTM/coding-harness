@@ -246,6 +246,39 @@ Every adapter MUST obey these, and every consumer may rely on them:
 
 Provider configuration resolves before route registration into an immutable discriminated union. Normal mode carries `mode: 'normal'`, finite `maxRetries`, `retryableCodes`, and required `initialDelayMs`, `maxDelayMs`, and `jitterRatio`; always mode carries `mode: 'always'` and the same required backoff fields without a finite maximum. `LlmRuntime.providerRetryPolicy(provider)` returns the currently registered value and supplies normal defaults when the adapter omits one; `llmRetryPolicyOf(stream)` returns the value captured from the serving registration after the call selects that registration, so later route disposal or replacement cannot change an in-flight failure's recovery policy. The [generated config catalog](../config-catalog.md) lists the optional input fields.
 
+## Request-retry contributions
+
+`ctx.llmRetry` is the single executor for model-request recovery. It applies the serving provider's policy first, delegates to downstream recovery, and then considers at most one contributed fallback. A contribution can also supply a lifecycle signal that cancels both provider-owned and fallback waits. Registration returns a disposer and duplicate identities fail at registration.
+
+```ts type-equiv
+/** Facts available to one process-local request-retry contribution. */
+type RequestRetryContext = Parameters<Events['agent/request-error']>[0]
+```
+
+```ts type-equiv
+/** One eligible fallback policy and/or cancellation signal for a failed request. */
+interface RequestRetryContribution {
+  /** Policy considered only after the provider policy and downstream recovery decline. */
+  readonly policy?: ResolvedRetryPolicy
+  /** Additional cancellation signal applied to provider-owned and fallback waits. */
+  readonly signal?: AbortSignal
+}
+```
+
+```ts type-equiv
+/** Process-local contribution to request recovery owned by another capability. */
+interface RequestRetryContributor {
+  /** Stable policy identity used in durable retry-chain keys. */
+  readonly id: string
+  /**
+   * Resolve eligibility and lifecycle cancellation for one failed request.
+   * @param request - normalized failure and exact serving-provider facts.
+   * @returns contribution for this request, or undefined when ineligible.
+   */
+  resolve(request: RequestRetryContext): RequestRetryContribution | undefined
+}
+```
+
 ## `AppIdentity` — app attribution
 
 The static public application identity every adapter sends to providers ([`packages/llm/llm/src/attribution.ts`](../../packages/llm/llm/src/attribution.ts)). `attributionHeaders(identity?)` maps it to the standard `User-Agent` header only; OpenRouter-specific app attribution headers are intentionally not supported by this contract. The default `APP_IDENTITY` sources its version from the package manifest; every field is a public product fact - no secrets, paths, session ids, or per-user identifiers, and nothing per-request may influence the values. Rationale: Mandatory User-Agent attribution.
@@ -929,6 +962,23 @@ abstract tokens(): LlmOAuthTokenStore
 ```
 
 Source: [`packages/llm/llm-oauth/src/index.ts:126`](../../packages/llm/llm-oauth/src/index.ts)
+
+<a id="ctxllmretry--llmretry"></a>
+
+### `ctx.llmRetry` — `LlmRetry`
+
+`ctx.llmRetry`: the single executor for provider policies and contributed fallback policies. Contributions supply policy and lifecycle facts; this service alone owns backoff, durable retry events, chain numbering, and drain.
+
+```ts cordis-catalog
+/**
+ * Register one fallback/cancellation contribution under a stable identity.
+ * @param contributor - resolver for another capability's request failures.
+ * @returns disposer that removes the contribution with its owning fiber.
+ */
+register(contributor: RequestRetryContributor): () => void
+```
+
+Source: [`packages/llm/llm-retry/src/index.ts:149`](../../packages/llm/llm-retry/src/index.ts)
 
 <a id="llm-events"></a>
 

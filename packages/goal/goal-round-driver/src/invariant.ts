@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import { foldGoal, type FoldedGoal, type GoalMessageSource, type GoalView } from '@deepseek-ai/dsh-goal'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type {} from '@deepseek-ai/dsh-llm-retry/types'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { renderGoalRoundPrompt } from './prompt.ts'
 
@@ -42,12 +43,63 @@ function goalView(folded: FoldedGoal, source: GoalMessageSource, fail: Invariant
   }
 }
 
+/** Whether one retry key claims this package's contributed fallback policy. */
+function isGoalRetryPolicy(value: string, fail: InvariantFailure): boolean {
+  if (!value.startsWith('["contribution","goal-round-driver",')) return false
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(value)
+  } catch (error: unknown) {
+    return fail(`goal retry policy key is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (!Array.isArray(decoded) || decoded.length !== 6
+    || decoded[0] !== 'contribution' || decoded[1] !== 'goal-round-driver'
+    || decoded[2] !== 'always'
+    || decoded.slice(3).some(item => typeof item !== 'number' || !Number.isFinite(item))) {
+    return fail('goal retry policy key does not match the contributed always-policy fields')
+  }
+  return true
+}
+
+/** Validate that one contributed retry still belongs to its admitted goal round. */
+function validateGoalRetry(
+  prior: readonly SessionEvent[],
+  event: SessionEvent<'llm/retry'>,
+  fail: InvariantFailure,
+): void {
+  if (!isGoalRetryPolicy(event.data.policyKey, fail)) return
+  if (event.data.mode !== 'always') fail('goal retry contribution must use always mode')
+  const boundaryIndex = prior.findLastIndex(candidate =>
+    candidate.type === 'step/start' || candidate.type === 'step/end')
+  const boundary = prior[boundaryIndex]
+  if (boundary?.type !== 'step/start') fail('goal retry contribution requires an open step')
+  const roundMessage = prior.slice(boundaryIndex + 1).findLast((candidate): candidate is SessionEvent<'user/message'> =>
+    candidate.type === 'user/message'
+    && candidate.data.source.kind === 'goal'
+    && candidate.data.source.round > 0)
+  if (roundMessage === undefined || roundMessage.data.source.kind !== 'goal') {
+    fail('goal retry contribution requires an admitted goal-round message in the open step')
+  }
+  const folded = foldChecked(prior, fail)
+  const goal = folded.goal
+  if (goal === undefined || goal.phase !== 'active'
+    || goal.id !== roundMessage.data.source.goalId
+    || goal.revision !== roundMessage.data.source.revision
+    || folded.roundsStarted !== roundMessage.data.source.round) {
+    fail('goal retry contribution does not match the current durable goal round')
+  }
+}
+
 /** Validate one package-owned continuation message against its durable prefix. */
 function validateEvent(
   prior: readonly SessionEvent[],
   event: SessionEvent,
   fail: InvariantFailure,
 ): void {
+  if (event.type === 'llm/retry') {
+    validateGoalRetry(prior, event, fail)
+    return
+  }
   if (event.type !== 'user/message') return
   const source = event.data.source
   if (source.kind !== 'goal' || source.round <= 0) return

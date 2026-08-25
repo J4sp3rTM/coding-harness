@@ -248,6 +248,39 @@ interface LlmFailure {
 
 提供方配置会在路由注册前解析为不可变的可辨识联合。normal mode 携带 `mode: 'normal'`、有限的 `maxRetries`、`retryableCodes`，以及必填的 `initialDelayMs`、`maxDelayMs` 与 `jitterRatio`；always mode 携带 `mode: 'always'` 和相同的必填退避字段，但没有有限上限。`LlmRuntime.providerRetryPolicy(provider)` 返回当前注册的值，并在适配器省略策略时提供 normal 默认值；调用选定该注册后，`llmRetryPolicyOf(stream)` 返回为该调用服务的注册所捕获的值，因此之后释放或替换路由都无法改变进行中失败的恢复策略。可选配置输入字段由[生成的配置目录](../config-catalog.md)列出。
 
+## 请求重试贡献
+
+`ctx.llmRetry` 是模型请求恢复的唯一执行器。它先应用实际服务提供方的策略，再委托给下游恢复，最后考虑最多一项外部贡献的回退策略。一项贡献还可以提供生命周期 signal，用于取消提供方自有和回退策略的等待。注册会返回释放函数，重复的身份会在注册时失败。
+
+```ts type-equiv
+/** Facts available to one process-local request-retry contribution. */
+type RequestRetryContext = Parameters<Events['agent/request-error']>[0]
+```
+
+```ts type-equiv
+/** One eligible fallback policy and/or cancellation signal for a failed request. */
+interface RequestRetryContribution {
+  /** Policy considered only after the provider policy and downstream recovery decline. */
+  readonly policy?: ResolvedRetryPolicy
+  /** Additional cancellation signal applied to provider-owned and fallback waits. */
+  readonly signal?: AbortSignal
+}
+```
+
+```ts type-equiv
+/** Process-local contribution to request recovery owned by another capability. */
+interface RequestRetryContributor {
+  /** Stable policy identity used in durable retry-chain keys. */
+  readonly id: string
+  /**
+   * Resolve eligibility and lifecycle cancellation for one failed request.
+   * @param request - normalized failure and exact serving-provider facts.
+   * @returns contribution for this request, or undefined when ineligible.
+   */
+  resolve(request: RequestRetryContext): RequestRetryContribution | undefined
+}
+```
+
 ## `AppIdentity`：应用归属
 
 每个适配器都会向提供方发送的静态公开应用标识（[`packages/llm/llm/src/attribution.ts`](../../packages/llm/llm/src/attribution.ts)）。`attributionHeaders(identity?)` 只把它映射到标准 `User-Agent` header；该约定有意不支持 OpenRouter 特有的应用归属 header。默认 `APP_IDENTITY` 从包 manifest（元数据清单）获取版本；每个字段都是公开产品事实——不含 secret、路径、会话 id 或逐用户标识，且任何逐请求信息都不得影响这些值。设计理由见强制 User-Agent 归属。
@@ -935,6 +968,23 @@ abstract tokens(): LlmOAuthTokenStore
 ```
 
 Source: [`packages/llm/llm-oauth/src/index.ts:126`](../../packages/llm/llm-oauth/src/index.ts)
+
+<a id="ctxllmretry--llmretry"></a>
+
+### `ctx.llmRetry` — `LlmRetry`
+
+`ctx.llmRetry`: the single executor for provider policies and contributed fallback policies. Contributions supply policy and lifecycle facts; this service alone owns backoff, durable retry events, chain numbering, and drain.
+
+```ts cordis-catalog
+/**
+ * Register one fallback/cancellation contribution under a stable identity.
+ * @param contributor - resolver for another capability's request failures.
+ * @returns disposer that removes the contribution with its owning fiber.
+ */
+register(contributor: RequestRetryContributor): () => void
+```
+
+Source: [`packages/llm/llm-retry/src/index.ts:149`](../../packages/llm/llm-retry/src/index.ts)
 
 <a id="llm-events"></a>
 
