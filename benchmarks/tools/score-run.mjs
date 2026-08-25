@@ -68,8 +68,11 @@ async function scoreNative(taskDir, workspace, language) {
     args = ['-c', `
       set -e
       cd '${scoringDir}'
-      g++ -std=c++17 -o /tmp/dsh-bench-cpp-score tests/*_test.cpp tests/test/tests-main.cpp -I. -Itests 2>/dev/null || \
-      g++ -std=c++17 -o /tmp/dsh-bench-cpp-score $(find . -name '*_test.cpp') tests/test/tests-main.cpp -I. -Itests/test
+      # Compile the agent's implementation files together with the test files and
+      # the catch harness; without the implementation objects linking always fails.
+      g++ -std=c++17 -o /tmp/dsh-bench-cpp-score \\
+        $(find . -maxdepth 2 -name '*.cpp' ! -path './tests/test/*') \\
+        tests/test/tests-main.cpp -I. -Itests -Itests/test
       /tmp/dsh-bench-cpp-score
     `]
   } else if (language === 'java') {
@@ -87,7 +90,7 @@ async function scoreNative(taskDir, workspace, language) {
   }
 
   const outcome = await runCommand(command, args, { cwd: scoringDir, timeoutMs, env: { PYTHONPATH: scoringDir } })
-  writeFileSync(`${scoringDir}-test-output.log`, outcome.stdout)
+  writeFileSync(`${scoringDir}-test-output.log`, `${outcome.stdout}\n${outcome.stderr}`)
   return {
     status: outcome.status === 'completed' ? 'passed' : 'failed',
     exitCode: outcome.exitCode,
