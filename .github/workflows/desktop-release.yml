@@ -1,4 +1,4 @@
-# Build the desktop installers for a dsh-v* release tag and attach them to the
+# Build the desktop installers for a conduit-v* release tag and attach them to the
 # GitHub Release: unsigned macOS arm64 .dmg, Windows x64 NSIS .exe, and Linux
 # x64 .AppImage. No secrets beyond the automatic GITHUB_TOKEN; code signing and
 # notarization land when credentials exist. `workflow_dispatch` builds the same
@@ -8,7 +8,7 @@ name: Desktop Release
 
 on:
   push:
-    tags: ['dsh-v*']
+    tags: ['conduit-v*']
   workflow_dispatch:
 
 permissions:
