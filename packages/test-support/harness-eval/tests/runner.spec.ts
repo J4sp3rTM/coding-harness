@@ -18,7 +18,9 @@ describe('A/B evaluation paths', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
-  })
+    // Two complete A/B passes over the fixture catalog do real filesystem work
+    // per run, which exceeds the 5s default once workers contend.
+  }, 30_000)
 
   it('resolves a relative output directory before invoking an executor', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-harness-eval-relative-'))
