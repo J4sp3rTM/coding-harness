@@ -1,5 +1,5 @@
 diff --git a/dist/auth/oauth/oauth-page.js b/dist/auth/oauth/oauth-page.js
-index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..d81cde3324ccc01e8ef1c1c14ab45fb5a67beb5f 100644
+index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..cd973d067221a42ce8b5a794599b139ba75d82bb 100644
 --- a/dist/auth/oauth/oauth-page.js
 +++ b/dist/auth/oauth/oauth-page.js
 @@ -1,4 +1,5 @@
@@ -225,4 +225,5 @@ index 101153587266e9ef2e7864f8aab9b5fd485a6aa1..d81cde3324ccc01e8ef1c1c14ab45fb5
          details,
      });
  }
+\ No newline at end of file
 -//# sourceMappingURL=oauth-page.js.map

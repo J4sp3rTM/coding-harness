@@ -10,7 +10,9 @@
 
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { decodeStorageRecord, packChunkRuns, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
+import {
+  decodeStorageRecord, packChunkRuns, SESSION_FORMAT_VERSION, TOOL_NOT_STARTED, TOOL_OUTCOME_UNKNOWN,
+} from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader, SessionId, StorageRecord } from '@deepseek-ai/dsh-session'
 import { SessionFormatUnsupportedError, sessionFormatVersionRefusal } from '@deepseek-ai/dsh-session-persistence'
 
@@ -230,6 +232,36 @@ interface SessionLogScan {
   committedBytes: number
 }
 
+/** Whether one persisted tool result is an interrupted-turn recovery artifact. */
+function isRecoveryToolResult(event: SessionEvent): event is Extract<SessionEvent, { type: 'tool/result' }> {
+  return event.type === 'tool/result'
+    && (event.data.error?.code === TOOL_NOT_STARTED || event.data.error?.code === TOOL_OUTCOME_UNKNOWN)
+}
+
+/**
+ * Test whether a conflicting writer resumes exactly where a synthetic recovery
+ * suffix began. Only deterministic interrupted-turn closers and the optional
+ * constructor seed boundary may be superseded; any other committed event keeps
+ * the conflict fatal.
+ */
+function isSupersededRecoverySuffix(events: readonly SessionEvent[], start: number): boolean {
+  const suffix = events.slice(start)
+  let cursor = suffix.length - 1
+  if (suffix[cursor]?.type === 'session/end-seed') cursor -= 1
+  const turnEnd = suffix[cursor]
+  if (turnEnd?.type !== 'turn/end' || turnEnd.data.reason.kind !== 'interrupted') return false
+  const turn = turnEnd.data.turn
+  cursor -= 1
+  const stepEnd = suffix[cursor]
+  if (stepEnd?.type === 'step/end') {
+    if (stepEnd.data.turn !== turn) return false
+    cursor -= 1
+  }
+  return suffix.slice(0, cursor + 1).every(event =>
+    isRecoveryToolResult(event) && event.data.turn === turn,
+  )
+}
+
 /** Parse one complete header record supplied independently from event rows. */
 /**
  * Refuse a header carrying a format version this build does not read BEFORE
@@ -272,7 +304,9 @@ function parseHeaderRecord(record: Buffer): SessionHeader {
  * An event row may overlap the committed prefix when every repeated event is
  * structurally identical. A packed chunk row may also cross the committed
  * cursor: its stale prefix is ignored and its contiguous suffix continues the
- * log. Other conflicting repeats and forward sequence gaps are corruption.
+ * log. A concurrent-writer continuation may supersede exactly one synthetic
+ * interrupted-turn recovery suffix. Other conflicting repeats and forward
+ * sequence gaps are corruption.
  */
 export class SessionLogScanner {
   private readonly meta: SessionHeader
@@ -364,7 +398,16 @@ export class SessionLogScanner {
       return
     }
 
-    const rowStart = this.events.length
+    let rowStart = this.events.length
+    const first = decoded[0]
+    if (
+      first !== undefined
+      && Number.isSafeInteger(first.seq) && first.seq >= 0 && first.seq < rowStart
+      && isSupersededRecoverySuffix(this.events, first.seq)
+    ) {
+      this.events.length = first.seq
+      rowStart = first.seq
+    }
     const crossesCommittedCursor = decoded.length > 1
       && decoded.every(event => event.type === 'assistant/chunk')
       && (decoded[0]?.seq ?? rowStart) < rowStart
