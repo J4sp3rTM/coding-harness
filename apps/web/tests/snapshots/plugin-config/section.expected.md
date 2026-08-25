@@ -1,22 +1,22 @@
-- dialog "设置":
+- dialog "Settings":
   - navigation:
-    - text: 设置
-    - button "通用设置":
+    - text: Settings
+    - button "General":
       - img
-      - text: 通用设置
-    - button "模型":
+      - text: General
+    - button "Model":
       - img
-      - text: 模型
+      - text: Model
     - button "插件":
       - img
       - text: 插件
     - button "Agent 预设":
       - img
       - text: Agent 预设
-  - button "打开配置文件"
-  - button "关闭":
+  - button "Open configuration file"
+  - button "Close":
     - img
-    - text: 关闭
+    - text: Close
   - heading "插件" [level=2]
   - paragraph: 配置和查看本部署已安装的插件。
   - tablist "插件视图":
@@ -25,14 +25,14 @@
   - tabpanel "插件配置":
     - list:
       - listitem:
-        - 'button "展开设置: 终端"':
-          - text: 终端 限制 agent 运行的每一条命令。
+        - 'button "展开Settings: 终端"':
+          - text: 终端 限制 agent 运行的每一条Commands。
           - img
       - listitem:
-        - 'button "展开设置: Agent 循环"':
-          - text: Agent 循环 Agent 如何派发工具调用。
+        - 'button "展开Settings: Agent 循环"':
+          - text: Agent 循环 Agent 如何派发Tools调用。
           - img
       - listitem:
-        - 'button "展开设置: 网页搜索"':
+        - 'button "展开Settings: 网页搜索"':
           - text: 网页搜索 DeepSeek 搜索提供方。
           - img

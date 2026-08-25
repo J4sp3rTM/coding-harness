@@ -316,7 +316,7 @@ function fixtureModelGroups(): ModelProviderGroup[] {
         {
           id: 'deepseek-v4-pro',
           name: 'DeepSeek-V4-Pro',
-          description: '复杂任务',
+          description: '复杂To-dos',
           reasoning: DEEPSEEK_REASONING,
         },
       ],
@@ -388,11 +388,11 @@ function buildAlphaLog(): SessionEvent[] {
     if (turn === 0) {
       push({
         type: 'session/title',
-        data: { title: 'Fixture 历史会话', messageSeqs: [userSeq], source: { kind: 'fallback' } },
+        data: { title: 'Fixture 历史Sessions', messageSeqs: [userSeq], source: { kind: 'fallback' } },
       })
     }
     if (turn % 9 === 4) {
-      push({ type: 'user/message', surfaceOp: 'append', data: userMessage(text(`[fixture] 上下文注入（turn ${turn}）`), { kind: 'plugin', plugin: 'fixture' }) })
+      push({ type: 'user/message', surfaceOp: 'append', data: userMessage(text(`[fixture] Context injection（turn ${turn}）`), { kind: 'plugin', plugin: 'fixture' }) })
     }
     push({ type: 'step/start', data: { turn, step: 0 } })
     const withTool = turn % 5 === 2
@@ -408,7 +408,7 @@ function buildAlphaLog(): SessionEvent[] {
       push({ type: 'tool/result', surfaceOp: 'append', data: { turn, step: 0, message: toolResultMessage(callId, text(`ECHO: TURN ${turn}`), turn % 25 === 12) } })
       push({ type: 'step/end', data: { turn, step: 0 } })
       push({ type: 'step/start', data: { turn, step: 1 } })
-      push({ type: 'assistant/message', surfaceOp: 'append', data: { turn, step: 1, message: assistantMessage(text(`工具结果已消化（turn ${turn}）。`)) } })
+      push({ type: 'assistant/message', surfaceOp: 'append', data: { turn, step: 1, message: assistantMessage(text(`Tools结果已消化（turn ${turn}）。`)) } })
       push({ type: 'step/end', data: { turn, step: 1 } })
     } else {
       push({ type: 'assistant/message', surfaceOp: 'append', data: { turn, step: 0, message: assistantMessage(blocks) } })
@@ -569,7 +569,7 @@ function buildAlphaLog(): SessionEvent[] {
   push({
     type: 'user/message',
     surfaceOp: 'append',
-    data: userMessage([{ type: 'image', attachment: FIXTURE_IMAGE_REF }, ...text('历史用户图片')]),
+    data: userMessage([{ type: 'image', attachment: FIXTURE_IMAGE_REF }, ...text('历史用户Image')]),
   })
   push({ type: 'step/start', data: { turn: 73, step: 0 } })
   push({
@@ -579,7 +579,7 @@ function buildAlphaLog(): SessionEvent[] {
       turn: 73,
       step: 0,
       message: assistantMessage(
-        [...text('结构化模型图片：'), { type: 'image', attachment: FIXTURE_IMAGE_REF }],
+        [...text('结构化ModelImage：'), { type: 'image', attachment: FIXTURE_IMAGE_REF }],
         'fx-vision',
       ),
     },
@@ -1731,7 +1731,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       return {
         ok: true,
         value: [
-          { name: 'compact', description: 'fixture：压缩当前会话上下文' },
+          { name: 'compact', description: 'fixture：压缩当前Sessions上下文' },
           { name: 'echo', description: 'fixture：回显参数', input: { hint: 'text to echo' } },
           { name: 'goal', description: 'set or view the goal for a long-running task', input: { hint: '<objective>' } },
           { name: 'permission', description: 'Switch the permission preset (sandbox mode + approval policy)', input: { hint: '<preset>' } },
@@ -2155,7 +2155,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         data: {
           turn,
           step,
-          message: assistantMessage(text(aborted ? `${done}（已中断）` : done)),
+          message: assistantMessage(text(aborted ? `${done}（interrupted）` : done)),
           usage: fixtureUsage(turn, step),
         },
       })
@@ -2463,8 +2463,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             : userText === 'report model'
               ? (() => {
                 const selection = modelSelections.get(id)
-                return `当前模型：${selection?.provider ?? 'unknown'}/${selection?.model ?? 'unknown'}`
-                  + (selection?.reasoningEffort === undefined ? '' : ` · 推理等级：${selection.reasoningEffort}`)
+                return `当前Model：${selection?.provider ?? 'unknown'}/${selection?.model ?? 'unknown'}`
+                  + (selection?.reasoningEffort === undefined ? '' : ` · Effort：${selection.reasoningEffort}`)
               })()
               : `回声：${userText}。这是 fixture 的流式回复，用于验证打字机增长与定稿切换。`,
         )
@@ -2783,8 +2783,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         if (missing !== undefined) return missing
         return ok(request, {
           skills: [
-            { name: 'fixture-demo', description: 'fixture 技能样本', whenToUse: '仅供 UI 目录渲染验收', modelInvocable: true },
-            { name: 'fixture-user-only', description: 'fixture 仅用户技能样本', modelInvocable: false },
+            { name: 'fixture-demo', description: 'fixture Skills样本', whenToUse: '仅供 UI 目录渲染验收', modelInvocable: true },
+            { name: 'fixture-user-only', description: 'fixture user-onlySkills样本', modelInvocable: false },
           ],
         })
       },
@@ -2852,7 +2852,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             payload: {
               type: 'approval/requested', sessionId: sid('fx-alpha'),
               approvalId: pendingApprovalId,
-              toolName: 'dangerous_tool', reason: 'fixture 常驻审批（可答：批准/拒绝后消失）',
+              toolName: 'dangerous_tool', reason: 'fixture 常驻审批（可答：批准/Reject后消失）',
             },
           })
         }

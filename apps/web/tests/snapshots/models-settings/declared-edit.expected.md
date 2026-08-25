@@ -1,46 +1,46 @@
-- dialog "设置":
+- dialog "Settings":
   - navigation:
-    - text: 设置
-    - button "通用设置":
+    - text: Settings
+    - button "General":
       - img
-      - text: 通用设置
-    - button "模型":
+      - text: General
+    - button "Model":
       - img
-      - text: 模型
+      - text: Model
     - button "插件":
       - img
       - text: 插件
     - button "Agent 预设":
       - img
       - text: Agent 预设
-  - button "打开配置文件"
-  - button "关闭":
+  - button "Open configuration file"
+  - button "Close":
     - img
-    - text: 关闭
-  - heading "模型" [level=2]
-  - paragraph: 填入各提供方的 API 密钥即可使用其模型。
+    - text: Close
+  - heading "Model" [level=2]
+  - paragraph: 填入各提供方的 API 密钥即可使用其Model。
   - region "开发 agent 分级":
     - heading "开发 agent 分级" [level=3]
-    - paragraph: 父级／会话模型仍在编排器中选择。这些路由只用于委派工作和审查。
+    - paragraph: 父级／SessionsModel仍在编排器中选择。这些路由只用于委派工作和审查。
     - text: T1 —— 特殊审查
     - combobox "T1 —— 特殊审查":
-      - option "继承父级模型" [selected]
-    - combobox "T1 —— 特殊审查 · 推理等级" [disabled]:
-      - option "提供方默认推理等级" [selected]
+      - option "继承父级Model" [selected]
+    - combobox "T1 —— 特殊审查 · Effort" [disabled]:
+      - option "提供方默认Effort" [selected]
     - paragraph: 用于 frontier 或特殊审查；只会提升委派的审查工作。
     - text: T2 —— 实现与检查
     - combobox "T2 —— 实现与检查":
-      - option "继承父级模型" [selected]
-    - combobox "T2 —— 实现与检查 · 推理等级" [disabled]:
-      - option "提供方默认推理等级" [selected]
+      - option "继承父级Model" [selected]
+    - combobox "T2 —— 实现与检查 · Effort" [disabled]:
+      - option "提供方默认Effort" [selected]
     - paragraph: 用于普通实现、检查和验证。
     - text: T3 —— 简单且低风险
     - combobox "T3 —— 简单且低风险":
-      - option "继承父级模型" [selected]
-    - combobox "T3 —— 简单且低风险 · 推理等级" [disabled]:
-      - option "提供方默认推理等级" [selected]
+      - option "继承父级Model" [selected]
+    - combobox "T3 —— 简单且低风险 · Effort" [disabled]:
+      - option "提供方默认Effort" [selected]
     - paragraph: 用于简单、重复且低风险的工作。
-    - button "保存分级" [disabled]
+    - button "Save分级" [disabled]
   - list:
     - listitem:
       - text: minimax-cn
@@ -53,9 +53,9 @@
       - button "删除 Acme Gateway (acme-gateway)": 删除
       - text: Acme Gateway acme-gateway API 密钥
       - textbox "API 密钥":
-        - /placeholder: 输入 API 密钥，或留空使用环境认证
+        - /placeholder: Input API 密钥，或留空使用环境认证
       - group:
-        - text: 自定义设置 显示名称
+        - text: 自定义Settings 显示名称
         - textbox "显示名称":
           - /placeholder: acme-gateway
           - text: Acme Gateway
@@ -68,20 +68,20 @@
           - option "openai-completions" [selected]
           - option "openai-responses"
           - option "anthropic-messages"
-        - region "模型目录":
-          - text: 模型目录 已自定义模型目录
-          - button "恢复默认模型"
-          - button "获取可用模型"
-          - textbox "模型 ID 1":
-            - /placeholder: 模型 ID
+        - region "Model目录":
+          - text: Model目录 已自定义Model目录
+          - button "恢复默认Model"
+          - button "获取可用Model"
+          - textbox "Model ID 1":
+            - /placeholder: Model ID
             - text: acme-large
           - textbox "显示名称 1":
             - /placeholder: 显示名称
           - button "容量 1"
-          - button "删除模型 1"
-          - button "添加模型"
-      - button "取消"
-      - button "保存"
+          - button "删除Model 1"
+          - button "添加Model"
+      - button "Cancel"
+      - button "Save"
   - button "添加提供方":
     - img
     - text: 添加提供方

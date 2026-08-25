@@ -1,27 +1,27 @@
-- dialog "设置":
+- dialog "Settings":
   - navigation:
-    - text: 设置
-    - button "通用设置":
+    - text: Settings
+    - button "General":
       - img
-      - text: 通用设置
-    - button "模型":
+      - text: General
+    - button "Model":
       - img
-      - text: 模型
+      - text: Model
     - button "插件":
       - img
       - text: 插件
     - button "Agent 预设":
       - img
       - text: Agent 预设
-  - button "打开配置文件"
-  - button "关闭":
+  - button "Open configuration file"
+  - button "Close":
     - img
-    - text: 关闭
-  - text: Agent 预设 对此后新建的会话生效。运行中的会话保持它开始时的预设。
+    - text: Close
+  - text: Agent 预设 对此后新建的Sessions生效。Running的Sessions保持它开始时的预设。
   - button "标准模式":
     - text: 标准模式
     - img
-  - text: 权限 选择新会话的默认权限模式
+  - text: Permission Choose the default permission mode for new sessions
   - button "Workspace Write":
     - text: Workspace Write
     - img
@@ -29,17 +29,17 @@
   - button "中文":
     - text: 中文
     - img
-  - text: 外观
-  - button "浅色":
+  - text: Appearance
+  - button "Light":
     - img
-    - text: 浅色
-  - button "深色":
+    - text: Light
+  - button "Dark":
     - img
-    - text: 深色
-  - button "跟随系统" [pressed]:
+    - text: Dark
+  - button "System" [pressed]:
     - img
-    - text: 跟随系统
-  - text: 繁忙时 Enter 键行为 仅在智能体运行时生效；Cmd/Ctrl+Enter 使用另一行为
-  - button "排队发送":
-    - text: 排队发送
+    - text: System
+  - text: Enter behavior while busy Busy only; Cmd/Ctrl+Enter uses the other behavior
+  - button "Queue":
+    - text: Queue
     - img

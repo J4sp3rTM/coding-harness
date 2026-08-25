@@ -1,24 +1,24 @@
-- dialog "设置":
+- dialog "Settings":
   - navigation:
-    - text: 设置
-    - button "通用设置":
+    - text: Settings
+    - button "General":
       - img
-      - text: 通用设置
-    - button "模型":
+      - text: General
+    - button "Model":
       - img
-      - text: 模型
+      - text: Model
     - button "插件":
       - img
       - text: 插件
     - button "Agent 预设":
       - img
       - text: Agent 预设
-  - button "打开配置文件"
-  - button "关闭":
+  - button "Open configuration file"
+  - button "Close":
     - img
-    - text: 关闭
-  - heading "模型" [level=2]
-  - paragraph: 填入各提供方的 API 密钥即可使用其模型。
+    - text: Close
+  - heading "Model" [level=2]
+  - paragraph: 填入各提供方的 API 密钥即可使用其Model。
   - list:
     - listitem:
       - text: DeepSeek
@@ -26,47 +26,47 @@
       - button "编辑 DeepSeek (deepseek-official)": 编辑
       - text: DeepSeek deepseek-official API 密钥
       - textbox "API 密钥":
-        - /placeholder: 已配置——输入新值可替换
+        - /placeholder: 已配置——Input新值可替换
       - group:
-        - text: 自定义设置 API 地址
+        - text: 自定义Settings API 地址
         - textbox "API 地址":
           - /placeholder: https://api.deepseek.com
-        - region "模型目录":
-          - text: 模型目录 已自定义模型目录
-          - button "恢复默认模型"
-          - textbox "模型 ID 1":
-            - /placeholder: 模型 ID
+        - region "Model目录":
+          - text: Model目录 已自定义Model目录
+          - button "恢复默认Model"
+          - textbox "Model ID 1":
+            - /placeholder: Model ID
             - text: deepseek-v4-pro
           - textbox "显示名称 1":
             - /placeholder: 显示名称
             - text: DeepSeek-V4-Pro
           - button "容量 1":
             - img
-          - button "删除模型 1":
+          - button "删除Model 1":
             - img
-          - textbox "模型 ID 2":
-            - /placeholder: 模型 ID
+          - textbox "Model ID 2":
+            - /placeholder: Model ID
             - text: private-preview
           - textbox "显示名称 2":
             - /placeholder: 显示名称
             - text: Private Preview
           - button "容量 2" [expanded]:
             - img
-          - button "删除模型 2":
+          - button "删除Model 2":
             - img
           - text: 上下文窗口
           - textbox "上下文窗口 2":
             - /placeholder: 1M
             - text: "131072"
-          - text: 最大输出 token 数
-          - textbox "最大输出 token 数 2":
+          - text: 最大Output token 数
+          - textbox "最大Output token 数 2":
             - /placeholder: 256K
             - text: 64K
-          - button "添加模型":
+          - button "添加Model":
             - img
-            - text: 添加模型
-      - button "取消"
-      - button "保存"
+            - text: 添加Model
+      - button "Cancel"
+      - button "Save"
   - button "添加提供方":
     - img
     - text: 添加提供方

@@ -1,24 +1,24 @@
-- dialog "设置":
+- dialog "Settings":
   - navigation:
-    - text: 设置
-    - button "通用设置":
+    - text: Settings
+    - button "General":
       - img
-      - text: 通用设置
-    - button "模型":
+      - text: General
+    - button "Model":
       - img
-      - text: 模型
+      - text: Model
     - button "插件":
       - img
       - text: 插件
     - button "Agent 预设":
       - img
       - text: Agent 预设
-  - button "打开配置文件"
-  - button "关闭":
+  - button "Open configuration file"
+  - button "Close":
     - img
-    - text: 关闭
-  - heading "模型" [level=2]
-  - paragraph: 填入各提供方的 API 密钥即可使用其模型。
+    - text: Close
+  - heading "Model" [level=2]
+  - paragraph: 填入各提供方的 API 密钥即可使用其Model。
   - list:
     - listitem:
       - text: DeepSeek
@@ -64,7 +64,7 @@
     - option "zai-coding-cn"
   - text: API 密钥
   - textbox "API 密钥":
-    - /placeholder: 输入 API 密钥，或留空使用环境认证
-  - group: 自定义设置
-  - button "取消"
-  - button "保存"
+    - /placeholder: Input API 密钥，或留空使用环境认证
+  - group: 自定义Settings
+  - button "Cancel"
+  - button "Save"

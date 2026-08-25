@@ -11,8 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import { zh } from '../src/client/locales.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
+import { en } from '../src/client/locales.ts'
 import type { MenuState, TriggerHit } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { MenuView } from '../src/client/MenuView.tsx'
 
@@ -51,10 +51,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-// The framework-injected t seat, stubbed over the zh dictionaries (the
-// default locale); the stub mirrors the LocaleRuntime key fallback, so an
-// unknown source comes back verbatim (its raw name).
-const t = makeTranslate(zh, commonZh)
+// The framework-injected t seat, stubbed over the English feature dictionary
+// and common fallback; an unknown source comes back verbatim (its raw name).
+const t = makeTranslate(en, commonEn)
 
 function mount(state: MenuState) {
   const menu = createSnapshotStore<MenuState>(state)
@@ -84,7 +83,7 @@ describe('MenuView', () => {
     mount(openState())
     const options = screen.getAllByRole('option')
     expect(options.map(o => o.textContent)).toEqual(['⚑goalSet up a goal', 'plan'])
-    expect(screen.queryByText('正在加载…')).not.toBeNull()
+    expect(screen.queryByText('Loading…')).not.toBeNull()
   })
 
   it('titles each group with the localized source name, raw name for unknown sources, none for empty ready groups', () => {
@@ -96,7 +95,7 @@ describe('MenuView', () => {
         { source: 'skill', status: 'pending', items: [] },
       ],
     }))
-    expect(titles(view.container)).toEqual(['命令', 'mystery', '技能'])
+    expect(titles(view.container)).toEqual(['Commands', 'mystery', 'Skills'])
   })
 
   it('exposes the highlight via aria-activedescendant and aria-selected', () => {
