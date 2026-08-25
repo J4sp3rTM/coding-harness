@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-command-list-agents",
   "description": "Human-facing slash command listing a session's subagents",
-  "version": "0.1.0-rc.11",
+  "version": "0.1.0-rc.12",
   "publishConfig": {
     "access": "public"
   },
