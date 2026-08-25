@@ -126,6 +126,8 @@ async function scoreDocker(taskDir, runDir, containerName) {
   await runCommand('bash', ['-c', removeByLabel], { timeoutMs: 120_000 })
   const removeVolumes = `docker volume rm $(docker volume ls -q --filter 'label=com.docker.compose.project=${containerName}') 2>/dev/null; true`
   await runCommand('bash', ['-c', removeVolumes], { timeoutMs: 60_000 })
+  // Free the per-run image immediately: 30 swebench eval images would exhaust the VM disk.
+  await runCommand('docker', ['rmi', '-f', `dsh-bench-${containerName}`], { timeoutMs: 120_000 })
   return { status, exitCode: outcome.exitCode, detail: outcome.stderr.slice(-2_000) }
 }
 

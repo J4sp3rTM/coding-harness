@@ -92,6 +92,7 @@ for (const task of tasks) {
             task: { id: task.id, dataset: task.dataset },
             status: 'container-error', durationMs: up.durationMs,
           }, null, 2))
+          await runCommand('bash', ['-c', `docker rm -f $(docker ps -aq --filter 'label=com.docker.compose.project=${containerName}') 2>/dev/null; true`], { timeoutMs: 120_000 })
           continue
         }
       }
