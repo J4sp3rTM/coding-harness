@@ -10,14 +10,20 @@
 - id: goal
   name: '@deepseek-ai/dsh-goal'
 
+- id: llm-retry
+  name: '@deepseek-ai/dsh-llm-retry'
+
 - id: tool-goal
   name: '@deepseek-ai/dsh-tool-goal'
 
 - id: goal-round-driver
   name: '@deepseek-ai/dsh-goal-round-driver'
+  config:
+    transientRetry:
+      retryableCodes: [EMPTY_RESPONSE, PI_AI_ERROR, RATE_LIMIT, SERVER, TIMEOUT, TRANSPORT]
 ```
 
-该插件没有可调配置。`maxGoalRounds` 属于目标定义，面向模型的阻塞阈值则属于 [`dsh-tool-goal`](../tool-goal/README.md)；在驱动器中重复任一数值都可能产生分歧策略。
+`maxGoalRounds` 属于目标定义，面向模型的阻塞阈值则属于 [`dsh-tool-goal`](../tool-goal/README.md)；在驱动器中重复任一数值都可能产生分歧策略。`transientRetry` 会向 [`dsh-llm-retry`](../../llm/llm-retry/README.md) 注册一项仅供目标使用的贡献；退避、重试编号、持久事件和 teardown 排空仍只由该服务负责。可重试错误码默认是 `EMPTY_RESPONSE`、`PI_AI_ERROR`、`RATE_LIMIT`、`SERVER`、`TIMEOUT` 与 `TRANSPORT`。退避默认初始 500 毫秒、最大 10 秒并带 10% jitter。有效且不超过最大值的提供方 `Retry-After` 会原样使用；超出上限时使用本地退避，因为目标回退没有尝试次数上限。`AUTH`、`QUOTA`、`INVALID_REQUEST` 与 `CONTEXT_WINDOW_EXCEEDED` 等永久类别不会重试，除非显式加入配置。
 
 ## Round 约定
 
@@ -29,7 +35,7 @@
 
 ## Idle 检查点
 
-整个 agent 进入 idle 时，持久 goal phase 和 revision 具有权威性。phase 为 active、已启用续行且仍有容量的 goal 会预留下一 Round；完成、暂停、阻塞和编辑都会阻止续行。驱动器不会通过关联 goal 消息与 `turn/end` 来对前一段活动分类，因此提供方错误和 token 上限不属于提示词级 goal 结果。
+整个 agent 进入 idle 时，持久 goal phase 和 revision 具有权威性。phase 为 active、已启用续行且仍有容量的 goal 会预留下一 Round；完成、暂停、阻塞和编辑都会阻止续行。有限提供方策略会先消耗自己的重试预算；提供方策略和下游恢复都拒绝后，配置的目标贡献会在同一请求步骤中重试，因此不会消耗新的 Round。提供方 `always` 策略仍是唯一重试所有者。永久提供方错误与 token 上限仍会终止目标 Round。
 
 ## 生命周期与持久性
 
@@ -37,7 +43,7 @@
 
 此插件加载到现有 agent 上时绝不会继承续行启用状态。`GoalService.disarm()` 会移除进程本地权限，而不改变持久 phase、revision 或历史；之后由用户明确授权的 resume 会记录重新启用续行。会话 resume 和 fork 后，goal 领域通过 `agent/session-start` 处理应用相同规则。
 
-取消会移除 inbox 中待处理的工作，或留下 agent 范围的 aborted 状态。在下一次 idle 检查点，驱动器会暂停存在已预留或已准入尝试的 goal，避免取消后自动重启；与 goal 尝试无关的取消只会撤销进程本地续行权限。如果 pause 变更失败，驱动器会回退到停用续行。插件 teardown 会关闭准入，停用所有活跃 goal 的续行，以 `parent` cause 取消正在进行的工作，并在事件防护仍生效的情况下等待驱动器和 agent 完全停稳。
+取消会移除 inbox 中待处理的工作，或留下 agent 范围的 aborted 状态。在下一次 idle 检查点，驱动器会暂停存在已预留或已准入尝试的 goal，避免取消后自动重启；与 goal 尝试无关的取消只会撤销进程本地续行权限。Goal 变更、竞争 inbox 输入、会话重启和插件 teardown 都会中止贡献信号，包括先于目标回退执行的提供方退避。如果 pause 变更失败，驱动器会回退到停用续行。插件 teardown 会关闭准入，停用所有活跃 goal 的续行，以 `parent` cause 取消正在进行的工作，并在事件防护仍生效的情况下等待驱动器和 agent 完全停稳。
 
 ## 模型体验
 
@@ -49,7 +55,7 @@
 
 #### Token 影响
 
-每个已准入 Round 会增加一个固定指令块和目标。后续请求会重新发送保留的 Round，直到压缩（compaction）将其遮蔽；不会创建新 agent，也不会复制对话前缀。
+每个已准入 Round 会增加一个固定指令块和目标。后续请求（包括每次恢复尝试）会重新发送保留的 Round，直到压缩（compaction）将其遮蔽；不会创建新 agent，也不会复制对话前缀。只要确切的目标 Round 仍处于准入状态，回退就没有请求次数上限，因此持续故障可能重复产生输入 token 费用，直到取消、Goal 变更、竞争工作或插件 teardown。
 
 #### KV Cache 影响
 
@@ -61,4 +67,5 @@
 - **只在同一会话执行**：此包有意不 spawn 新 agent、不 fork 会话前缀，也不实现 Ralph 风格的独立尝试；该工作流属于单独的插件层。
 - **已接受队列的卸载竞态**：Cordis 插件卸载是异步的。已经被 agent inbox 接受的 goal 提示词可以在卸载开始前启动并消耗其 Round；teardown 随后会取消请求、停用 goal 的续行并等待完全停稳。不会再启动后续 Round。
 - **只有 Round 上限，不是资源预算**：token、货币、时间与提供方配额策略保持独立。对应的会话事件不会归属于 goal 消息，也不会映射为 goal 阻塞代码。
-- **异常情况不自动重试**：暂时性的提供方与持久化失败需要之后由用户授权 resume，而不会采用隐式重试策略。
+- **暂时性回退没有次数上限**：符合条件的失败会在同一已准入 Round 内继续轮询，不会消耗 `maxGoalRounds`；需要费用或墙钟时间上限的部署必须提供独立取消策略。
+- **持久化失败仍会终止**：重试恢复只覆盖已规范化的模型请求失败；检查点失败会停用续行，需要之后由用户明确授权 resume。

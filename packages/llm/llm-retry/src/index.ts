@@ -1,11 +1,12 @@
 /**
- * Provider-routed model-request retry policy on the agent loop's request
+ * Provider and contributed model-request retry policies on the agent loop's
  * recovery extension point. Each scheduled retry is durable before its cancellable wait.
  *
  * @module @deepseek-ai/dsh-llm-retry
  */
 
 import { randomUUID } from 'node:crypto'
+import { Service } from '@deepseek-ai/cordis'
 import type { Context, Events } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, RequestErrorAction } from '@deepseek-ai/dsh-agent'
@@ -17,8 +18,11 @@ import type { LlmRetryEventData } from './types.ts'
 export type { LlmRetryEventData, LlmRetryStartedEventData } from './types.ts'
 export { RetryId } from './brand.ts'
 
-export const name = 'llm-retry'
-export const inject = ['agents']
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    llmRetry: LlmRetry
+  }
+}
 
 /** This policy executor has no config; providers own `retryPolicy`. */
 export type Config = Readonly<Record<string, never>>
@@ -39,6 +43,29 @@ function validateConfig(config: Config): void {
 export interface RetryInternals {
   /** Random sample in the inclusive zero-to-one range used for jitter. */
   random?: () => number
+}
+
+/** Facts available to one process-local request-retry contribution. */
+export type RequestRetryContext = Parameters<Events['agent/request-error']>[0]
+
+/** One eligible fallback policy and/or cancellation signal for a failed request. */
+export interface RequestRetryContribution {
+  /** Policy considered only after the provider policy and downstream recovery decline. */
+  readonly policy?: ResolvedRetryPolicy
+  /** Additional cancellation signal applied to provider-owned and fallback waits. */
+  readonly signal?: AbortSignal
+}
+
+/** Process-local contribution to request recovery owned by another capability. */
+export interface RequestRetryContributor {
+  /** Stable policy identity used in durable retry-chain keys. */
+  readonly id: string
+  /**
+   * Resolve eligibility and lifecycle cancellation for one failed request.
+   * @param request - normalized failure and exact serving-provider facts.
+   * @returns contribution for this request, or undefined when ineligible.
+   */
+  resolve(request: RequestRetryContext): RequestRetryContribution | undefined
 }
 
 type DownstreamOutcome =
@@ -75,6 +102,21 @@ function retryPolicyKey(policy: ResolvedRetryPolicy): string {
     ])
 }
 
+function contributionPolicyKey(id: string, policy: ResolvedRetryPolicy): string {
+  return policy.mode === 'always'
+    ? JSON.stringify(['contribution', id, policy.mode, policy.initialDelayMs, policy.maxDelayMs, policy.jitterRatio])
+    : JSON.stringify([
+      'contribution',
+      id,
+      policy.mode,
+      policy.maxRetries,
+      [...policy.retryableCodes].sort(),
+      policy.initialDelayMs,
+      policy.maxDelayMs,
+      policy.jitterRatio,
+    ])
+}
+
 function cancellableDelay(delayMs: number, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return Promise.resolve(false)
   return new Promise((resolve) => {
@@ -90,25 +132,80 @@ function cancellableDelay(delayMs: number, signal: AbortSignal): Promise<boolean
   })
 }
 
-/**
- * Install provider-routed normal or unbounded request recovery.
- * @param ctx - plugin context that owns the listener and active waits.
- * @param config - empty executor config; provider registrations own policy.
- * @param internals - non-serializable deterministic hooks for tests.
- */
-export function apply(ctx: Context, config: Config = {}, internals: RetryInternals = {}): void {
-  validateConfig(config)
-  const random = internals.random ?? Math.random
-  const lifetime = new AbortController()
-  const active = new Set<Promise<RequestErrorAction>>()
+type BackoffOutcome =
+  | { readonly handled: false }
+  | { readonly handled: true; readonly action: RequestErrorAction }
 
-  function track(operation: Promise<RequestErrorAction>): Promise<RequestErrorAction> {
-    const tracked = operation.finally(() => active.delete(tracked))
-    active.add(tracked)
+interface ResolvedContributions {
+  readonly signals: AbortSignal[]
+  readonly fallbacks: { readonly id: string; readonly policy: ResolvedRetryPolicy }[]
+}
+
+/**
+ * `ctx.llmRetry`: the single executor for provider policies and contributed
+ * fallback policies. Contributions supply policy and lifecycle facts; this
+ * service alone owns backoff, durable retry events, chain numbering, and drain.
+ */
+export class LlmRetry extends Service {
+  static inject = ['agents']
+  private readonly random: () => number
+  private readonly lifetime = new AbortController()
+  private readonly active = new Set<Promise<RequestErrorAction>>()
+  private readonly contributors = new Map<string, RequestRetryContributor>()
+
+  /**
+   * Create the retry executor and install its request-error listener.
+   * @param ctx - plugin context that owns the service and active waits.
+   * @param config - empty executor config; provider registrations own policy.
+   * @param internals - non-serializable deterministic hooks for tests.
+   */
+  constructor(ctx: Context, config: Config = {}, internals: RetryInternals = {}) {
+    super(ctx, 'llmRetry')
+    validateConfig(config)
+    this.random = internals.random ?? Math.random
+
+    const disposeListener = ctx.on('agent/request-error', (
+      payload,
+      next: () => Promise<RequestErrorAction>,
+    ) => {
+      // A waterfall may have captured this callback before its registration was
+      // removed. Lifetime cancellation must prevent that stale callback from
+      // entering a downstream policy after disposal.
+      if (this.lifetime.signal.aborted) return Promise.resolve<RequestErrorAction>(undefined)
+      return this.track(this.recover(payload, next))
+    })
+
+    ctx.effect(() => async () => {
+      disposeListener()
+      this.lifetime.abort(new Error('llm-retry plugin disposed'))
+      await Promise.allSettled([...this.active])
+    }, 'llm-retry: abort and drain active recovery')
+  }
+
+  /**
+   * Register one fallback/cancellation contribution under a stable identity.
+   * @param contributor - resolver for another capability's request failures.
+   * @returns disposer that removes the contribution with its owning fiber.
+   */
+  register(contributor: RequestRetryContributor): () => void {
+    if (contributor.id.length === 0) throw new Error('llm-retry: contributor id must be non-empty')
+    if (this.contributors.has(contributor.id)) {
+      throw new Error(`llm-retry: contributor ${JSON.stringify(contributor.id)} is already registered`)
+    }
+    const dispose = this.ctx.effect(function* (this: LlmRetry) {
+      this.contributors.set(contributor.id, contributor)
+      yield () => { this.contributors.delete(contributor.id) }
+    }.bind(this), `llmRetry.register(${JSON.stringify(contributor.id)})`)
+    return () => void dispose()
+  }
+
+  private track(operation: Promise<RequestErrorAction>): Promise<RequestErrorAction> {
+    const tracked = operation.finally(() => this.active.delete(tracked))
+    this.active.add(tracked)
     return tracked
   }
 
-  async function backoff(
+  private async backoff(
     agent: Agent,
     turn: number,
     step: number,
@@ -119,9 +216,9 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
     retry: number,
     retryId: RetryId,
     delayMs: number,
-    signal: AbortSignal,
+    signals: readonly AbortSignal[],
   ): Promise<RequestErrorAction> {
-    const fusedSignal = AbortSignal.any([signal, lifetime.signal])
+    const fusedSignal = AbortSignal.any([...signals, this.lifetime.signal])
     if (fusedSignal.aborted) return
     const eventData: LlmRetryEventData = policy.mode === 'normal'
       ? {
@@ -153,32 +250,37 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
     return { kind: 'retry' }
   }
 
-  async function recover(
-    { agent, turn, step, provider, failure, retryPolicy: policy, signal }: Parameters<Events['agent/request-error']>[0],
-    next: () => Promise<RequestErrorAction>,
-  ): Promise<RequestErrorAction> {
-    if (policy === undefined) return next()
-    if (policy.mode === 'always') {
-      if (signal.aborted || lifetime.signal.aborted) return
-      const fusedSignal = AbortSignal.any([signal, lifetime.signal])
-      // The loop and plugin lifetime stay open until delegated recovery settles.
-      // An abort then wins before the decision or fallback can mutate later state.
-      const downstream = await settleDownstream(next)
-      if (fusedSignal.aborted) return
-      if (downstream.type === 'error') {
-        ctx.logger.warn(
-          `llm-retry: provider "${provider}" always policy ignored a downstream recovery failure: %o`,
-          downstream.error,
-        )
+  private resolveContributions(request: RequestRetryContext): ResolvedContributions {
+    const signals: AbortSignal[] = []
+    const fallbacks: ResolvedContributions['fallbacks'][number][] = []
+    for (const contributor of [...this.contributors.values()]) {
+      const contribution = contributor.resolve(request)
+      if (contribution?.signal !== undefined) signals.push(contribution.signal)
+      if (contribution?.policy !== undefined) {
+        fallbacks.push({ id: contributor.id, policy: contribution.policy })
       }
-      if (downstream.type === 'decision' && downstream.decision?.kind === 'retry') {
-        return downstream.decision
-      }
-    } else if (!policy.retryableCodes.includes(failure.code)) {
-      return next()
     }
+    return { signals, fallbacks }
+  }
 
-    const policyKey = retryPolicyKey(policy)
+  private fallbackOf(
+    fallbacks: ResolvedContributions['fallbacks'],
+  ): ResolvedContributions['fallbacks'][number] | undefined {
+    if (fallbacks.length > 1) {
+      throw new Error(`llm-retry: multiple fallback policies are eligible (${fallbacks.map(item => item.id).join(', ')})`)
+    }
+    return fallbacks[0]
+  }
+
+  private async schedule(
+    { agent, turn, step, provider, failure }: RequestRetryContext,
+    policy: ResolvedRetryPolicy,
+    policyKey: string,
+    signals: readonly AbortSignal[],
+  ): Promise<BackoffOutcome> {
+    if (policy.mode === 'normal' && !policy.retryableCodes.includes(failure.code)) {
+      return { handled: false }
+    }
     const priorPolicyRetry = agent.session.events.findLast((event): event is SessionEvent<'llm/retry'> =>
       event.type === 'llm/retry'
       && event.data.turn === turn
@@ -187,7 +289,7 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
       && event.data.policyKey === policyKey,
     )
     const previousRetry = priorPolicyRetry?.data.retry ?? 0
-    if (policy.mode === 'normal' && previousRetry >= policy.maxRetries) return next()
+    if (policy.mode === 'normal' && previousRetry >= policy.maxRetries) return { handled: false }
     const retry = previousRetry + 1
     const retryId = priorPolicyRetry?.data.retryId ?? RetryId(randomUUID())
     let delayMs: number
@@ -195,32 +297,63 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
       && Number.isFinite(failure.providerRetryAfterMs)
       && failure.providerRetryAfterMs > 0) {
       if (failure.providerRetryAfterMs > policy.maxDelayMs) {
-        if (policy.mode === 'normal') return next()
-        delayMs = localDelay(policy, retry, random)
+        if (policy.mode === 'normal') return { handled: false }
+        delayMs = localDelay(policy, retry, this.random)
       } else {
         delayMs = failure.providerRetryAfterMs
       }
     } else {
-      delayMs = localDelay(policy, retry, random)
+      delayMs = localDelay(policy, retry, this.random)
     }
-
-    return backoff(agent, turn, step, failure, provider, policy, policyKey, retry, retryId, delayMs, signal)
+    const action = await this.backoff(
+      agent, turn, step, failure, provider, policy, policyKey, retry, retryId, delayMs, signals,
+    )
+    return { handled: true, action }
   }
 
-  const disposeListener = ctx.on('agent/request-error', (
-    payload,
+  private async recover(
+    request: RequestRetryContext,
     next: () => Promise<RequestErrorAction>,
-  ) => {
-    // A waterfall may have captured this callback before its registration was
-    // removed. Lifetime cancellation must prevent that stale callback from
-    // entering a downstream policy after disposal.
-    if (lifetime.signal.aborted) return Promise.resolve<RequestErrorAction>(undefined)
-    return track(recover(payload, next))
-  })
+  ): Promise<RequestErrorAction> {
+    const { provider, retryPolicy: policy, signal } = request
+    const contributions = this.resolveContributions(request)
+    const signals = [signal, ...contributions.signals]
+    if (policy?.mode === 'always') {
+      if (signals.some(item => item.aborted) || this.lifetime.signal.aborted) return
+      const fusedSignal = AbortSignal.any([...signals, this.lifetime.signal])
+      // The loop and plugin lifetime stay open until delegated recovery settles.
+      // An abort then wins before the decision or fallback can mutate later state.
+      const downstream = await settleDownstream(next)
+      if (fusedSignal.aborted) return
+      if (downstream.type === 'error') {
+        this.ctx.logger.warn(
+          `llm-retry: provider "${provider}" always policy ignored a downstream recovery failure: %o`,
+          downstream.error,
+        )
+      }
+      if (downstream.type === 'decision' && downstream.decision?.kind === 'retry') {
+        return downstream.decision
+      }
+      const scheduled = await this.schedule(request, policy, retryPolicyKey(policy), signals)
+      return scheduled.handled ? scheduled.action : undefined
+    }
+    if (policy !== undefined) {
+      const scheduled = await this.schedule(request, policy, retryPolicyKey(policy), signals)
+      if (scheduled.handled) return scheduled.action
+    }
 
-  ctx.effect(() => async () => {
-    disposeListener()
-    lifetime.abort(new Error('llm-retry plugin disposed'))
-    await Promise.allSettled([...active])
-  }, 'llm-retry: abort and drain active recovery')
+    const downstream = await next()
+    if (downstream?.kind === 'retry' || signals.some(item => item.aborted)) return downstream
+    const fallback = this.fallbackOf(contributions.fallbacks)
+    if (fallback === undefined) return downstream
+    const scheduled = await this.schedule(
+      request,
+      fallback.policy,
+      contributionPolicyKey(fallback.id, fallback.policy),
+      signals,
+    )
+    return scheduled.handled ? scheduled.action : downstream
+  }
 }
+
+export default LlmRetry

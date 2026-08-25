@@ -368,6 +368,21 @@
     },
     {
       "doc": "docs/subsystems/llm-streaming.md",
+      "symbol": "RequestRetryContext",
+      "source": "packages/llm/llm-retry/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/llm-streaming.md",
+      "symbol": "RequestRetryContribution",
+      "source": "packages/llm/llm-retry/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/llm-streaming.md",
+      "symbol": "RequestRetryContributor",
+      "source": "packages/llm/llm-retry/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/llm-streaming.md",
       "symbol": "TokenUsage",
       "source": "packages/llm/llm/src/types.ts"
     },

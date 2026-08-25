@@ -10,7 +10,7 @@ import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type { MockLlmBehavior, MockLlmServer } from '@deepseek-ai/dsh-llm-mock-server'
 import { startMockLlmServer } from '@deepseek-ai/dsh-llm-mock-server'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import * as Retry from '../src/index.ts'
+import Retry from '../src/index.ts'
 
 let context: Context | undefined
 const servers: MockLlmServer[] = []

@@ -8,15 +8,53 @@ import { FiberState } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { GoalMessageSource, GoalRef, GoalView } from '@deepseek-ai/dsh-goal'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
+import type { BackoffConfig, ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
+import type { RequestRetryContext } from '@deepseek-ai/dsh-llm-retry'
 import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
+import z from '@deepseek-ai/schemastery'
 import { renderGoalRoundPrompt } from './prompt.ts'
 
 export { renderGoalRoundPrompt } from './prompt.ts'
 
 export const name = 'goal-round-driver'
-export const inject = ['agents', 'goals', 'sessions']
+export const inject = ['agents', 'goals', 'sessions', 'llmRetry']
+
+/** Goal-round failures that represent a provider likely to recover. */
+const DEFAULT_TRANSIENT_ERROR_CODES = Object.freeze([
+  'EMPTY_RESPONSE',
+  'PI_AI_ERROR',
+  'RATE_LIMIT',
+  'SERVER',
+  'TIMEOUT',
+  'TRANSPORT',
+])
+
+/** Configuration for continuing an armed goal after a transient request error. */
+export interface Config {
+  /** Same-step recovery policy used only while an armed goal round is active. */
+  transientRetry?: {
+    /**
+     * Failure codes retried without another goal round; defaults to EMPTY_RESPONSE,
+     * PI_AI_ERROR, RATE_LIMIT, SERVER, TIMEOUT, and TRANSPORT.
+     */
+    retryableCodes?: string[]
+    /** Backoff defaults to 500 ms initial, 10 seconds maximum, and 0.1 jitter. */
+    backoff?: BackoffConfig
+  }
+}
+
+/** Runtime schema for {@link Config}. */
+export const Config: z<Config> = z.object({
+  transientRetry: z.object({
+    retryableCodes: z.array(z.string()).default([...DEFAULT_TRANSIENT_ERROR_CODES]),
+    backoff: z.object({
+      initialDelayMs: z.number().default(500),
+      maxDelayMs: z.number().default(10_000),
+      jitterRatio: z.number().default(0.1),
+    }),
+  }),
+})
 
 /** Identity reserved before a goal continuation enters the agent inbox. */
 interface RoundIdentity {
@@ -43,6 +81,7 @@ interface DriverState {
   requested: boolean
   run: Promise<void> | undefined
   stopping: boolean
+  retryAbort: AbortController | undefined
 }
 
 /** Whether a source identifies an automatic, positive-numbered goal round. */
@@ -72,8 +111,29 @@ function renderThrown(value: unknown): string {
   return value instanceof Error ? value.message : String(value)
 }
 
+/** Abort every provider or fallback retry wait guarded by this goal attempt. */
+function abortRetry(state: DriverState): void {
+  state.retryAbort?.abort(new Error('goal-round retry no longer admitted'))
+  state.retryAbort = undefined
+}
+
 /** Install automatic same-session continuation and its race fences. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config = {}): void {
+  const transientRetry = config.transientRetry
+  const transientErrorCodes = Object.freeze([
+    ...(transientRetry?.retryableCodes ?? DEFAULT_TRANSIENT_ERROR_CODES),
+  ])
+  if (transientErrorCodes.length === 0
+    || transientErrorCodes.some(code => code.length === 0)
+    || new Set(transientErrorCodes).size !== transientErrorCodes.length) {
+    throw new Error('goal-round-driver: transientRetry.retryableCodes must contain unique non-empty codes')
+  }
+  const retryPolicy = resolveRetryPolicy(
+    transientRetry?.backoff === undefined
+      ? { mode: 'always' }
+      : { mode: 'always', backoff: transientRetry.backoff },
+    'goal-round-driver.transientRetry.backoff',
+  )
   const states = new Map<Agent, DriverState>()
 
   /** Create state for an exact currently live agent. */
@@ -88,6 +148,7 @@ export function apply(ctx: Context): void {
       requested: false,
       run: undefined,
       stopping: false,
+      retryAbort: undefined,
     }
     states.set(agent, state)
     return state
@@ -240,6 +301,24 @@ export function apply(ctx: Context): void {
     })
   }
 
+  ctx.effect(() => ctx.llmRetry.register({
+    id: name,
+    resolve: (request: RequestRetryContext) => {
+      const state = stateFor(request.agent)
+      const goal = currentGoal(state)
+      const attempt = state.attempt
+      if (state.stopping || attempt?.phase !== 'admitted'
+        || goal?.phase !== 'active' || goal.activation !== 'armed'
+        || goal.id !== attempt.goalId || goal.revision !== attempt.revision
+        || request.signal.aborted) return undefined
+      state.retryAbort ??= new AbortController()
+      return {
+        signal: state.retryAbort.signal,
+        ...transientErrorCodes.includes(request.failure.code) ? { policy: retryPolicy } : {},
+      }
+    },
+  }), 'goal-round-driver: request retry contribution')
+
   // One composite effect keeps the step fence installed until this
   // plugin's own scheduling tasks settle.
   ctx.effect(function* () {
@@ -255,6 +334,7 @@ export function apply(ctx: Context): void {
       state.attempt = undefined
       state.competingQueued = false
       state.needsCheckpoint = false
+      abortRetry(state)
     })
     ctx.on('agent/status', ({ agent, status }) => {
       const state = stateFor(agent)
@@ -278,14 +358,16 @@ export function apply(ctx: Context): void {
     ctx.on('goal/changed', ({ agent }) => {
       const state = stateFor(agent)
       state.needsCheckpoint = true
+      abortRetry(state)
       requestDrive(state)
     })
 
     ctx.on('agent/inbox/inserted', ({ agent, message }) => {
-      if (!agent.inbox.nextTurn.some(candidate => candidate.id === message.id)) return
       const state = stateFor(agent)
       const attempt = state.attempt
       if (attempt !== undefined && sameQueued(message.content, message.source, attempt)) return
+      abortRetry(state)
+      if (!agent.inbox.nextTurn.some(candidate => candidate.id === message.id)) return
       state.competingQueued = true
       if (attempt?.phase === 'queued') attempt.stale = true
     })
@@ -314,7 +396,11 @@ export function apply(ctx: Context): void {
             state.attempt.phase = 'admitted'
           }
           return
+        case 'assistant/message':
+          abortRetry(state)
+          return
         case 'turn/end':
+          abortRetry(state)
           if (event.data.reason.kind === 'max-tokens') {
             disarm(state)
             return
@@ -426,6 +512,7 @@ export function apply(ctx: Context): void {
       const waits: Promise<void>[] = []
       for (const state of states.values()) {
         state.stopping = true
+        abortRetry(state)
         disarm(state)
         const attempt = state.attempt
         if (attempt !== undefined) {

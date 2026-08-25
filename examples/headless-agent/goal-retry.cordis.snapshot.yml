@@ -1,0 +1,22 @@
+# Keyless goal-retry composition for the headless stream-json snapshot.
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@deepseek-ai/dsh-llm-deepseek'
+        disabled: true
+      - insert:
+          - id: goal-retry-snapshot-backend
+            name: './tests/fixtures/goal-retry-snapshot-backend.mjs'
+          - id: goal
+            name: '@deepseek-ai/dsh-goal'
+          - id: goal-round-driver
+            name: '@deepseek-ai/dsh-goal-round-driver'
+            config:
+              transientRetry:
+                backoff:
+                  initialDelayMs: 1
+                  maxDelayMs: 1
+                  jitterRatio: 0

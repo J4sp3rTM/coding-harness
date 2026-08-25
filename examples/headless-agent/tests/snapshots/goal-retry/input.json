@@ -1,0 +1,8 @@
+{
+  "steps": [
+    {
+      "op": "prompt",
+      "text": "start the goal retry snapshot"
+    }
+  ]
+}

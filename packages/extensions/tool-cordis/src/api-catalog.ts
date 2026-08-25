@@ -914,6 +914,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'llmRetry',
+    summary: '`ctx.llmRetry`: the single executor for provider policies and contributed fallback policies.',
+    description: '`ctx.llmRetry`: the single executor for provider policies and contributed fallback policies. Contributions supply policy and lifecycle facts; this service alone owns backoff, durable retry events, chain numbering, and drain.',
+    methods: [
+      {
+        signature: 'register(contributor: RequestRetryContributor): () => void',
+        description: 'Register one fallback/cancellation contribution under a stable identity.',
+        parameters: [{ name: 'contributor', description: 'resolver for another capability\'s request failures.' }],
+        returns: 'disposer that removes the contribution with its owning fiber.',
+      },
+    ],
+  },
+  {
     key: 'lsp',
     summary: 'The LSP capability seam (`ctx.lsp`).',
     description: 'The LSP capability seam (`ctx.lsp`). Owns provider registration/selection and normalized query execution; exposes exactly the four operations and no protocol escape hatch.',
@@ -3699,6 +3712,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RequestHeaderReason',
     declaration: 'export type RequestHeaderReason = \'initial\' | \'resume\' | \'change\';',
+  },
+  {
+    name: 'RequestRetryContext',
+    declaration: 'export type RequestRetryContext = Parameters<Events[\'agent/request-error\']>[0];',
+  },
+  {
+    name: 'RequestRetryContribution',
+    declaration: 'export interface RequestRetryContribution {\n    readonly policy?: ResolvedRetryPolicy;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'RequestRetryContributor',
+    declaration: 'export interface RequestRetryContributor {\n    readonly id: string;\n    resolve(request: RequestRetryContext): RequestRetryContribution | undefined;\n}',
   },
   {
     name: 'RequestRunOutcome',
