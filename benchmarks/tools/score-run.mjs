@@ -84,7 +84,14 @@ async function scoreNative(taskDir, workspace, language) {
     command = './gradlew'
     args = ['test', '--console=plain']
   } else if (language === 'go') {
-    return { status: 'unsupported', detail: 'go toolchain not installed on this host' }
+    // Exercism layout: single module root package; copy only the .go test files next
+    // to the implementation. Copying the tests/ tree would make `go test ./...`
+    // compile it as a separate package and fail spuriously.
+    const goTestFiles = readdirSync(testsSource).filter(f => f.endsWith('.go'))
+    if (goTestFiles.length === 0) return { status: 'unsupported', detail: 'no go tests found' }
+    for (const f of goTestFiles) cpSync(join(testsSource, f), join(scoringDir, f))
+    command = 'go'
+    args = ['test', './...']
   } else {
     return { status: 'unsupported', detail: `no native scorer for ${language}` }
   }
