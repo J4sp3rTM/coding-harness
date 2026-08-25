@@ -118,9 +118,14 @@ async function scoreDocker(taskDir, runDir, containerName) {
   if (/SWEBench results starts here\s*\nPASSED/.test(outcome.stdout)) status = 'passed'
   if (/SWEBench results starts here\s*\nFAILED/.test(outcome.stdout)) status = 'failed'
   writeFileSync(join(runDir, 'test-output.log'), outcome.stdout.slice(-20_000))
-  // Tear down the whole compose project (helper services and volumes included).
-  await runCommand('docker', ['compose', '-p', containerName, '-f', join(taskDir, 'docker-compose.yaml'), 'down', '--volumes', '--remove-orphans'], { timeoutMs: 120_000 })
-  await runCommand('docker', ['rm', '-f', containerName], { timeoutMs: 60_000 })
+  // Tear down everything labelled with this run's compose project: helper services,
+  // networks, and volumes. Label filters avoid re-running compose with task-specific
+  // environment variables that the down path would otherwise need. containerName is
+  // restricted to [a-z0-9_-] at creation, so shell interpolation here is safe.
+  const removeByLabel = `docker rm -f $(docker ps -aq --filter 'label=com.docker.compose.project=${containerName}') 2>/dev/null; true`
+  await runCommand('bash', ['-c', removeByLabel], { timeoutMs: 120_000 })
+  const removeVolumes = `docker volume rm $(docker volume ls -q --filter 'label=com.docker.compose.project=${containerName}') 2>/dev/null; true`
+  await runCommand('bash', ['-c', removeVolumes], { timeoutMs: 60_000 })
   return { status, exitCode: outcome.exitCode, detail: outcome.stderr.slice(-2_000) }
 }
 
