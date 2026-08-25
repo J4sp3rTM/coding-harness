@@ -82,7 +82,7 @@ for (const task of tasks) {
             T_BENCH_CONTAINER_LOGS_PATH: '/logs',
             T_BENCH_TASK_AGENT_LOGS_PATH: join(runDir, 'agent-logs'),
             T_BENCH_CONTAINER_AGENT_LOGS_PATH: '/agent-logs',
-            T_BENCH_TEST_DIR: '/tmp/bench-tests',
+            T_BENCH_TEST_DIR: '/tests',
           },
         })
         if (up.status !== 'completed') {

@@ -105,12 +105,36 @@ async function scoreNative(taskDir, workspace, language) {
   }
 }
 
+/**
+ * Ensures the task container is up, rebuilding from cached layers when a previous
+ * scoring pass removed it. Needed to re-score runs whose containers were torn down.
+ */
+async function ensureContainer(taskDir, containerName) {
+  const inspect = await runCommand('docker', ['container', 'inspect', containerName], { timeoutMs: 30_000 })
+  if (inspect.status === 'completed') return null
+  const up = await runCommand('docker', ['compose', '-p', containerName, '-f', join(taskDir, 'docker-compose.yaml'), 'up', '-d'], {
+    timeoutMs: 30 * 60_000,
+    env: {
+      T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME: `dsh-bench-${containerName}`,
+      T_BENCH_TASK_DOCKER_CLIENT_CONTAINER_NAME: containerName,
+      T_BENCH_TASK_LOGS_PATH: '/tmp/dsh-bench-misc/logs',
+      T_BENCH_CONTAINER_LOGS_PATH: '/logs',
+      T_BENCH_TASK_AGENT_LOGS_PATH: '/tmp/dsh-bench-misc/agent-logs',
+      T_BENCH_CONTAINER_AGENT_LOGS_PATH: '/agent-logs',
+    },
+  })
+  if (up.status !== 'completed') return up.stderr
+  return null
+}
+
 /** Runs the task's own run-tests.sh inside the still-running container, then removes it. */
 async function scoreDocker(taskDir, runDir, containerName) {
-  const exists = await runCommand('docker', ['container', 'inspect', containerName], { timeoutMs: 30_000 })
-  if (exists.status !== 'completed') return { status: 'no-container' }
-  await runCommand('docker', ['exec', containerName, 'mkdir', '-p', '/tmp/bench-tests'], { timeoutMs: 30_000 })
-  const cpTests = await runCommand('docker', ['cp', `${join(taskDir, 'tests')}/.`, `${containerName}:/tmp/bench-tests`], { timeoutMs: 120_000 })
+  const ensureError = await ensureContainer(taskDir, containerName)
+  if (ensureError !== null) return { status: 'no-container', detail: ensureError.slice(-500) }
+  // Terminal-bench's contract puts tests at /tests; swebench's packaged run-tests.sh
+  // reads /tests/config.json directly, so TEST_DIR and the copy target must agree.
+  await runCommand('docker', ['exec', containerName, 'rm', '-rf', '/tests'], { timeoutMs: 30_000 })
+  const cpTests = await runCommand('docker', ['cp', `${join(taskDir, 'tests')}/.`, `${containerName}:/tests`], { timeoutMs: 120_000 })
   if (cpTests.status !== 'completed') return { status: 'scoring-error', detail: cpTests.stderr }
   if (existsSync(join(taskDir, 'run-tests.sh'))) {
     const cpScript = await runCommand('docker', ['cp', join(taskDir, 'run-tests.sh'), `${containerName}:/tmp/run-tests.sh`], { timeoutMs: 60_000 })
@@ -120,7 +144,7 @@ async function scoreDocker(taskDir, runDir, containerName) {
   }
   const outcome = await runCommand(
     'docker',
-    ['exec', containerName, 'bash', '-lc', 'export TEST_DIR=/tmp/bench-tests; bash /tmp/run-tests.sh'],
+    ['exec', containerName, 'bash', '-lc', 'export TEST_DIR=/tests; bash /tmp/run-tests.sh'],
     { timeoutMs: 40 * 60_000 },
   )
   // SWE-bench packaged tasks report their verdict between marker lines; trust it over exit codes.
