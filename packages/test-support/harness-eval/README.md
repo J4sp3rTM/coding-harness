@@ -36,4 +36,6 @@ None across runs. Every fixture variant starts in an isolated process and copied
 
 ## Known Limitations and Deferred Work
 
-The catalog contains four baseline fixtures plus three medium, three difficult, and three stress fixtures. The stress group covers asynchronous lifecycle rollback, durable crash recovery, and tenant-isolated tool execution. It does not generate tasks or use a model judge. Usage and cost remain `null` when an adapter does not expose authoritative measurements, and a complete A/B result requires both an OpenRouter API key for Codex and an OpenRouter OAuth subscription for DeepSeek Harness.
+- **Fixed catalog** — four baseline fixtures plus three medium, three difficult, and three stress fixtures; the stress group covers asynchronous lifecycle rollback, durable crash recovery, and tenant-isolated tool execution. The evaluator neither generates tasks nor uses a model judge.
+- **Unmeasured usage stays `null`** — usage and cost are `null` when an adapter exposes no authoritative measurement, so those columns are not comparable across every adapter.
+- **A/B needs both credentials** — a complete A/B result requires an OpenRouter API key for Codex and an OpenRouter OAuth subscription for DeepSeek Harness.

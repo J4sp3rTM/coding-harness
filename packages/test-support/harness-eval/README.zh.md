@@ -36,4 +36,6 @@ validation 之后，两个独立的 `stealth/ox-alpha` context 会在不知道 v
 
 ## 已知限制和延期工作
 
-目录包含四个 baseline fixture，以及各三个 medium、difficult 和 stress fixture。stress 组覆盖异步生命周期回滚、持久化崩溃恢复和租户隔离的工具执行。它不生成任务，也不使用模型 judge。当适配器无法提供权威测量时，usage 和 cost 保持为 `null`；完整 A/B 结果同时需要供 Codex 使用的 OpenRouter API key 和供 DeepSeek Harness 使用的 OpenRouter OAuth 订阅。
+- **固定目录** — 四个 baseline fixture，以及各三个 medium、difficult 和 stress fixture；stress 组覆盖异步生命周期回滚、持久化崩溃恢复和租户隔离的工具执行。评估器既不生成任务，也不使用模型 judge。
+- **未测量的用量保持 `null`** — 当适配器无法提供权威测量时，usage 和 cost 为 `null`，因此这些列并非在所有适配器之间都可比较。
+- **A/B 需要两套凭据** — 完整 A/B 结果同时需要供 Codex 使用的 OpenRouter API key 和供 DeepSeek Harness 使用的 OpenRouter OAuth 订阅。
