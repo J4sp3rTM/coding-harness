@@ -1,54 +1,44 @@
-# DeepSeek Harness
+# Conduit
 
-English | [中文](README.zh.md)
+Conduit is an open-source agent harness for coding agents. It is a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`).
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+Everything in Conduit is a plugin. The plugin system is [Cordis](https://github.com/cordiverse/cordis).
 
-It uses an architecture where **everything is a plugin**, and is powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper).
+## Why Conduit
 
-## Developer preview
+- **Lower cost.** Conduit builds each request by appending to the last request. The request prefix stays stable, so the provider cache serves most input tokens. Measured on our own traffic: 95.6% of tokens came from the cache.
+- **Better results.** On our benchmark suite, Conduit completed 79.5% of tasks. The Codex harness completed 59.0%. A blind reviewer also scored Conduit's results higher: 85.7 against 74.8 of 100.
+- **Faster runs.** The median task took 5.0 minutes on Conduit, against 8.9 minutes on the Codex harness.
 
-DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+See [BENCHMARKS.md](BENCHMARKS.md) for details.
 
-## Run
+## Status
 
-### Run from `npm`
+Conduit is in early development. Releases can break compatibility.
 
-Install `Node.js`, then run:
+## Run from source
 
-```sh
-npx @deepseek-ai/dsh web
-```
-
-The command starts the Web UI, served at `http://127.0.0.1:3080` by default. See [Web UI guide](docs/user/guide/index.md).
-
-### Run from source
-
-To run from a repository checkout:
+Install Node.js 22.19 or later (or Node.js 24 or later) and pnpm.
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone https://github.com/J4sp3rTM/coding-harness.git conduit
+cd conduit
 pnpm install
 pnpm run build
 pnpm dsh web
 ```
 
-## Community and support
+The command starts the Web UI at `http://127.0.0.1:3080`. See the [Web UI guide](docs/user/guide/index.md).
 
-- Feel free to submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join <a href="https://discord.gg/Ycq5dCaS4">DeepSeek Harness Discord community</a>.
+## Documentation
+
+- Architecture: [docs/architecture.md](docs/architecture.md)
+- Development guide: [docs/development.md](docs/development.md)
+- Instructions for coding agents: [AGENTS.md](AGENTS.md)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Development
-
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
-
-For agents, follow [AGENTS.md](AGENTS.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
