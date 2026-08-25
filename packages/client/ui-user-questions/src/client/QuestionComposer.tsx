@@ -32,7 +32,8 @@ type Feedback = { key: 'error.incomplete' | 'error.unanswered' } | { text: strin
  * @returns Display label plus recommendation state.
  */
 export function parseRecommendedLabel(label: string): { label: string; recommended: boolean } {
-  const suffix = /\s*(?:\((?:recommended|推荐)\)|（(?:recommended|推荐)）)\s*$/i
+  // Both paren widths: providers emit the badge with ASCII or full-width parens.
+  const suffix = /\s*[（(]recommended[)）]\s*$/i
   return suffix.test(label)
     ? { label: label.replace(suffix, ''), recommended: true }
     : { label, recommended: false }

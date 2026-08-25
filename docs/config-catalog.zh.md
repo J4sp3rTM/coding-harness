@@ -658,6 +658,32 @@ export interface Config {
 
 来源：[`packages/goal/goal/src/index.ts:116`](../packages/goal/goal/src/index.ts)
 
+<a id="deepseek-aidsh-goal-round-driver"></a>
+
+## `@deepseek-ai/dsh-goal-round-driver`
+
+需要：`agents` · `goals` · `sessions` · `llmRetry`
+
+```ts config-catalog
+/** Configuration for continuing an armed goal after a transient request error. */
+export interface Config {
+  /** Same-step recovery policy used only while an armed goal round is active. */
+  transientRetry?: {
+    /**
+     * Failure codes retried without another goal round; defaults to EMPTY_RESPONSE,
+     * PI_AI_ERROR, RATE_LIMIT, SERVER, TIMEOUT, and TRANSPORT.
+     */
+    retryableCodes?: string[]
+    /** Backoff defaults to 500 ms initial, 10 seconds maximum, and 0.1 jitter. */
+    backoff?: BackoffConfig
+  }
+}
+```
+
+依赖：[`BackoffConfig`](../packages/llm/llm/src/index.ts)
+
+来源：[`packages/goal/goal-round-driver/src/index.ts:34`](../packages/goal/goal-round-driver/src/index.ts)
+
 <a id="deepseek-aidsh-headless"></a>
 
 ## `@deepseek-ai/dsh-headless`
@@ -1225,7 +1251,7 @@ export interface ReplayModelConfig {
 export type Config = Readonly<Record<string, never>>
 ```
 
-来源：[`packages/llm/llm-retry/src/index.ts:24`](../packages/llm/llm-retry/src/index.ts)
+来源：[`packages/llm/llm-retry/src/index.ts:28`](../packages/llm/llm-retry/src/index.ts)
 
 <a id="deepseek-aidsh-lsp-stdio"></a>
 
@@ -3147,21 +3173,28 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-skill`（[`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-subagent`（[`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-theme`（[`packages/client/ui-theme/src/index.ts`](../packages/client/ui-theme/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-theme-green`（[`packages/client/ui-theme-green/src/index.ts`](../packages/client/ui-theme-green/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-tool`（[`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-trajectory`（[`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-user-questions`（[`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-workflow-run`（[`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-workspace`（[`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts)）
 - `@deepseek-ai/dsh-command-clear` — 需要 `commands` · `sessions`（[`packages/session/command-clear/src/index.ts`](../packages/session/command-clear/src/index.ts)）
-- `@deepseek-ai/dsh-command-compact` — 需要 `commands` · `compact`（[`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts)）
+- `@deepseek-ai/dsh-command-compact` — 需要 `commands` · `compaction`（[`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts)）
+- `@deepseek-ai/dsh-command-context` — 需要 `commands` · `tokenMeter`（[`packages/context/command-context/src/index.ts`](../packages/context/command-context/src/index.ts)）
 - `@deepseek-ai/dsh-command-feedback` — 需要 `commands`（[`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts)）
 - `@deepseek-ai/dsh-command-goal` — 需要 `commands` · `goals`（[`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts)）
+- `@deepseek-ai/dsh-command-help` — 需要 `commands`（[`packages/interaction/command-help/src/index.ts`](../packages/interaction/command-help/src/index.ts)）
+- `@deepseek-ai/dsh-command-list-agents` — 需要 `commands` · `subagents`（[`packages/subagent/command-list-agents/src/index.ts`](../packages/subagent/command-list-agents/src/index.ts)）
 - `@deepseek-ai/dsh-command-login` — 需要 `commands` · `llmOAuth` · `userQuestions`（[`packages/llm/command-login/src/index.ts`](../packages/llm/command-login/src/index.ts)）
+- `@deepseek-ai/dsh-command-rename` — 需要 `commands` · `sessionTitle`（[`packages/session/command-rename/src/index.ts`](../packages/session/command-rename/src/index.ts)）
+- `@deepseek-ai/dsh-command-skills` — 需要 `commands` · `skills`（[`packages/skill/command-skills/src/index.ts`](../packages/skill/command-skills/src/index.ts)）
+- `@deepseek-ai/dsh-command-status` — 需要 `commands`（[`packages/session/command-status/src/index.ts`](../packages/session/command-status/src/index.ts)）
+- `@deepseek-ai/dsh-command-usage` — 需要 `commands` · `tokenMeter`（[`packages/llm/command-usage/src/index.ts`](../packages/llm/command-usage/src/index.ts)）
 - `@deepseek-ai/dsh-commands`（[`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts)）
 - `@deepseek-ai/dsh-cordis-client-runner`（[`packages/extensions/cordis-client-runner/src/index.ts`](../packages/extensions/cordis-client-runner/src/index.ts)）
 - `@deepseek-ai/dsh-fs-e2b` — 需要 `e2b`（[`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts)）
 - `@deepseek-ai/dsh-fs-observation-policy`（[`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts)）
-- `@deepseek-ai/dsh-goal-round-driver` — 需要 `agents` · `goals` · `sessions`（[`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts)）
 - `@deepseek-ai/dsh-host-directory-picker-auto` — 需要 `webServer` · `loader`（[`packages/host/directory-picker-auto/src/index.ts`](../packages/host/directory-picker-auto/src/index.ts)）
 - `@deepseek-ai/dsh-host-directory-picker-native`（[`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts)）
 - `@deepseek-ai/dsh-host-electron-carrier`（[`packages/host/electron-carrier/src/index.ts`](../packages/host/electron-carrier/src/index.ts)）
