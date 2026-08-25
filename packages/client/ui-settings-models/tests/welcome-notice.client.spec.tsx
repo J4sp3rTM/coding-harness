@@ -64,7 +64,7 @@ describe('WelcomeNotice', () => {
   it('uses the exact owner copy', () => {
     expect(WELCOME_NOTICE_COPY).toEqual({
       title: 'Internal Testing Notice',
-      body: expect.any(String),
+      body: expect.any(String) as unknown,
       continueLabel: 'Continue',
     })
     expect(en.welcomeBody).toBe(WELCOME_NOTICE_COPY.body)
