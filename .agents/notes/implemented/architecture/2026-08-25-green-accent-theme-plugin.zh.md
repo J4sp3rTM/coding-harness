@@ -1,8 +1,8 @@
 # Agent Note：绿色强调色主题插件
 
-[English](2026-08-25-green-accent-theme-plugin.md) | 中文
-
 状态：已实现
+
+[English](2026-08-25-green-accent-theme-plugin.md) | 中文
 
 ## 问题
 

@@ -1,8 +1,8 @@
 # Agent Note: Green accent theme plugin
 
-English | [中文](2026-08-25-green-accent-theme-plugin.zh.md)
-
 Status: implemented
+
+English | [中文](2026-08-25-green-accent-theme-plugin.zh.md)
 
 ## Problem
 

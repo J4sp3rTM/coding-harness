@@ -1,8 +1,8 @@
 # Agent Note: Goal Round 暂时性请求恢复
 
-[English](2026-08-25-goal-transient-request-recovery.md) | 中文
-
 状态：已实现
+
+[English](2026-08-25-goal-transient-request-recovery.md) | 中文
 
 ## 问题
 

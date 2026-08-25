@@ -115,6 +115,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Adapters register provider implementations; the loop and compaction call the provider-neutral stream service.',
   },
   {
+    key: 'llmRetry',
+    pkg: 'llm-retry',
+    title: 'Model-request retry executor',
+    mode: 'core',
+    consumers: ['goal-round-driver'],
+    note: 'Provider-declared policies and registered contributions decide eligibility only; this service alone owns backoff, retry-chain numbering, durable retry events, and teardown drain.',
+  },
+  {
     key: 'tokenMeter',
     pkg: 'token-meter',
     title: 'Replay token measurement',

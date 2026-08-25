@@ -477,7 +477,7 @@ Source: [`packages/hooks/hook-protocol/src/types.ts:31`](../packages/hooks/hook-
 #### `llm/retry` — log-only
 
 ```ts persistence-catalog
-/** Durable, non-surface record of one provider-routed retry scheduled after a failed request attempt. */
+/** Durable, non-surface record of one policy-routed retry scheduled after a failed request attempt. */
 'llm/retry': LlmRetryEventData
 ```
 
@@ -842,7 +842,7 @@ Source: [`packages/core/session/src/types.ts:291`](../packages/core/session/src/
 'tool-workflow/agent-end': ToolWorkflowAgentEndData
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:57`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/workflow/tool-workflow/src/types.ts:68`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowagent-start--log-only"></a>
 
@@ -851,12 +851,12 @@ Source: [`packages/workflow/tool-workflow/src/types.ts:57`](../packages/workflow
 ```ts persistence-catalog
 /**
  * Records one published workflow member.
- * @param data - run identity, member sequence, display identity, and child Session.
+ * @param data - run identity, member sequence, display identity, child Session, and optional provider/model/effort route.
  */
 'tool-workflow/agent-start': ToolWorkflowAgentStartData
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:52`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/workflow/tool-workflow/src/types.ts:63`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowrun-end--log-only"></a>
 
@@ -870,7 +870,7 @@ Source: [`packages/workflow/tool-workflow/src/types.ts:52`](../packages/workflow
 'tool-workflow/run-end': ToolWorkflowRunEndData
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:62`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/workflow/tool-workflow/src/types.ts:73`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowrun-start--log-only"></a>
 
@@ -884,7 +884,7 @@ Source: [`packages/workflow/tool-workflow/src/types.ts:62`](../packages/workflow
 'tool-workflow/run-start': ToolWorkflowRunStartData
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:47`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/workflow/tool-workflow/src/types.ts:58`](../packages/workflow/tool-workflow/src/types.ts)
 
 ### `turn/*`
 

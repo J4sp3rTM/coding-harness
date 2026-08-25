@@ -479,7 +479,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 #### `llm/retry` — log-only
 
 ```ts persistence-catalog
-/** Durable, non-surface record of one provider-routed retry scheduled after a failed request attempt. */
+/** Durable, non-surface record of one policy-routed retry scheduled after a failed request attempt. */
 'llm/retry': LlmRetryEventData
 ```
 
@@ -530,6 +530,19 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```
 
 来源：[`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
+
+### `rat/*`
+
+<a id="ratprompt--log-only"></a>
+
+#### `rat/prompt` — 仅日志
+
+```ts persistence-catalog
+/** Last-wins custom system-prompt value; null removes the section. */
+'rat/prompt': { text: string | null }
+```
+
+来源：[`packages/context/command-rat/src/index.ts:28`](../packages/context/command-rat/src/index.ts)
 
 ### `request/*`
 
@@ -831,7 +844,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool-workflow/agent-end': ToolWorkflowAgentEndData
 ```
 
-来源：[`packages/workflow/tool-workflow/src/types.ts:57`](../packages/workflow/tool-workflow/src/types.ts)
+来源：[`packages/workflow/tool-workflow/src/types.ts:68`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowagent-start--log-only"></a>
 
@@ -840,12 +853,12 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```ts persistence-catalog
 /**
  * Records one published workflow member.
- * @param data - run identity, member sequence, display identity, and child Session.
+ * @param data - run identity, member sequence, display identity, child Session, and optional provider/model/effort route.
  */
 'tool-workflow/agent-start': ToolWorkflowAgentStartData
 ```
 
-来源：[`packages/workflow/tool-workflow/src/types.ts:52`](../packages/workflow/tool-workflow/src/types.ts)
+来源：[`packages/workflow/tool-workflow/src/types.ts:63`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowrun-end--log-only"></a>
 
@@ -859,7 +872,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool-workflow/run-end': ToolWorkflowRunEndData
 ```
 
-来源：[`packages/workflow/tool-workflow/src/types.ts:62`](../packages/workflow/tool-workflow/src/types.ts)
+来源：[`packages/workflow/tool-workflow/src/types.ts:73`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowrun-start--log-only"></a>
 
@@ -873,7 +886,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool-workflow/run-start': ToolWorkflowRunStartData
 ```
 
-来源：[`packages/workflow/tool-workflow/src/types.ts:47`](../packages/workflow/tool-workflow/src/types.ts)
+来源：[`packages/workflow/tool-workflow/src/types.ts:58`](../packages/workflow/tool-workflow/src/types.ts)
 
 ### `turn/*`
 

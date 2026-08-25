@@ -114,6 +114,24 @@ flowchart LR
   cfg --> plugin_dsh_base_command_compact
   plugin_dsh_base_command_login["command-login<br/>@deepseek-ai/dsh-command-login"]
   cfg --> plugin_dsh_base_command_login
+  plugin_dsh_base_command_clear["command-clear<br/>@deepseek-ai/dsh-command-clear"]
+  cfg --> plugin_dsh_base_command_clear
+  plugin_dsh_base_command_rat["command-rat<br/>@deepseek-ai/dsh-command-rat"]
+  cfg --> plugin_dsh_base_command_rat
+  plugin_dsh_base_command_help["command-help<br/>@deepseek-ai/dsh-command-help"]
+  cfg --> plugin_dsh_base_command_help
+  plugin_dsh_base_command_status["command-status<br/>@deepseek-ai/dsh-command-status"]
+  cfg --> plugin_dsh_base_command_status
+  plugin_dsh_base_command_usage["command-usage<br/>@deepseek-ai/dsh-command-usage"]
+  cfg --> plugin_dsh_base_command_usage
+  plugin_dsh_base_command_context["command-context<br/>@deepseek-ai/dsh-command-context"]
+  cfg --> plugin_dsh_base_command_context
+  plugin_dsh_base_command_rename["command-rename<br/>@deepseek-ai/dsh-command-rename"]
+  cfg --> plugin_dsh_base_command_rename
+  plugin_dsh_base_command_skills["command-skills<br/>@deepseek-ai/dsh-command-skills"]
+  cfg --> plugin_dsh_base_command_skills
+  plugin_dsh_base_command_list_agents["command-list-agents<br/>@deepseek-ai/dsh-command-list-agents"]
+  cfg --> plugin_dsh_base_command_list_agents
   plugin_dsh_base_subagent["subagent<br/>@deepseek-ai/dsh-subagent"]
   cfg --> plugin_dsh_base_subagent
   plugin_dsh_base_subagent_spawn_in_process["subagent-spawn-in-process<br/>@deepseek-ai/dsh-subagent-spawn-in-process"]
@@ -134,6 +152,8 @@ flowchart LR
   cfg --> plugin_dsh_base_workflow_worker_thread
   plugin_dsh_base_tool_workflow["tool-workflow<br/>@deepseek-ai/dsh-tool-workflow"]
   cfg --> plugin_dsh_base_tool_workflow
+  plugin_dsh_base_development_workflow_settings["development-workflow-settings<br/>@deepseek-ai/dsh-tool-development-workflow/settings"]
+  cfg --> plugin_dsh_base_development_workflow_settings
   plugin_dsh_base_timeout_policy["timeout-policy<br/>@deepseek-ai/dsh-tool-call-timeout-policy"]
   cfg --> plugin_dsh_base_timeout_policy
   plugin_dsh_base_spill_local["spill-local<br/>@deepseek-ai/dsh-spill-local"]
@@ -227,6 +247,15 @@ flowchart LR
 | `compaction-basic` | `@deepseek-ai/dsh-compaction-basic` |
 | `command-compact` | `@deepseek-ai/dsh-command-compact` |
 | `command-login` | `@deepseek-ai/dsh-command-login` |
+| `command-clear` | `@deepseek-ai/dsh-command-clear` |
+| `command-rat` | `@deepseek-ai/dsh-command-rat` |
+| `command-help` | `@deepseek-ai/dsh-command-help` |
+| `command-status` | `@deepseek-ai/dsh-command-status` |
+| `command-usage` | `@deepseek-ai/dsh-command-usage` |
+| `command-context` | `@deepseek-ai/dsh-command-context` |
+| `command-rename` | `@deepseek-ai/dsh-command-rename` |
+| `command-skills` | `@deepseek-ai/dsh-command-skills` |
+| `command-list-agents` | `@deepseek-ai/dsh-command-list-agents` |
 | `subagent` | `@deepseek-ai/dsh-subagent` |
 | `subagent-spawn-in-process` | `@deepseek-ai/dsh-subagent-spawn-in-process` |
 | `subagent-fork-in-process` | `@deepseek-ai/dsh-subagent-fork-in-process` |
@@ -237,6 +266,7 @@ flowchart LR
 | `tool-subagent-report` | `@deepseek-ai/dsh-tool-subagent-report` |
 | `workflow-worker-thread` | `@deepseek-ai/dsh-workflow-worker-thread` |
 | `tool-workflow` | `@deepseek-ai/dsh-tool-workflow` |
+| `development-workflow-settings` | `@deepseek-ai/dsh-tool-development-workflow/settings` |
 | `timeout-policy` | `@deepseek-ai/dsh-tool-call-timeout-policy` |
 | `spill-local` | `@deepseek-ai/dsh-spill-local` |
 | `spill-policy` | `@deepseek-ai/dsh-spill-policy` |

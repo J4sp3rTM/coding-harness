@@ -1,8 +1,8 @@
 # Agent Note: Goal-round transient request recovery
 
-English | [中文](2026-08-25-goal-transient-request-recovery.zh.md)
-
 Status: implemented
+
+English | [中文](2026-08-25-goal-transient-request-recovery.zh.md)
 
 ## Problem
 
