@@ -1169,6 +1169,117 @@ describe('JsonlSessionPersistence: default packed chunk rows', () => {
     ])
   })
 
+  it('scanLog: lets a continued writer supersede only the synthetic recovery branch', () => {
+    for (const code of ['TOOL_NOT_STARTED', 'TOOL_OUTCOME_UNKNOWN']) {
+      const logText = [
+        JSON.stringify({ type: 'session', version: 0, id: `continued-writer-${code}`, createdAt: 1, delegationDepth: 0 }),
+        JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+        JSON.stringify({ type: 'step/start', seq: 1, time: 2, data: { turn: 1, step: 1 } }),
+        JSON.stringify({ type: 'tool/result', seq: 2, time: 2, data: {
+          turn: 1, step: 1,
+          message: { id: 'recovery', role: 'user', source: { kind: 'tool', callId: 'c' }, content: [] },
+          error: { name: 'RecoveryError', code },
+        } }),
+        JSON.stringify({ type: 'step/end', seq: 3, time: 2, data: { turn: 1, step: 1 } }),
+        JSON.stringify({ type: 'turn/end', seq: 4, time: 2, data: { turn: 1, reason: { kind: 'interrupted' } } }),
+        JSON.stringify({ type: 'session/end-seed', seq: 5, time: 3, data: {} }),
+        JSON.stringify({ type: 'assistant/chunk', seq: 2, time: 4, data: {
+          turn: 1, step: 1, chunk: { type: 'block-start', index: 0, blockType: 'text' },
+        } }),
+        JSON.stringify({ type: 'step/end', seq: 3, time: 5, data: { turn: 1, step: 1 } }),
+        JSON.stringify({ type: 'turn/end', seq: 4, time: 5, data: { turn: 1, reason: { kind: 'completed' } } }),
+      ].join('\n') + '\n'
+
+      expect(scanLog(Buffer.from(logText)).events.map(event => [event.type, event.seq])).toEqual([
+        ['turn/start', 0],
+        ['step/start', 1],
+        ['assistant/chunk', 2],
+        ['step/end', 3],
+        ['turn/end', 4],
+      ])
+    }
+  })
+
+  it('scanLog: supersedes recovery without an open step or constructor boundary', () => {
+    const logText = [
+      JSON.stringify({ type: 'session', version: 0, id: 'continued-before-seed', createdAt: 1, delegationDepth: 0 }),
+      JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+      JSON.stringify({ type: 'turn/end', seq: 1, time: 1, data: { turn: 1, reason: { kind: 'interrupted' } } }),
+      JSON.stringify({ type: 'step/start', seq: 1, time: 2, data: { turn: 1, step: 1 } }),
+      JSON.stringify({ type: 'step/end', seq: 2, time: 3, data: { turn: 1, step: 1 } }),
+      JSON.stringify({ type: 'turn/end', seq: 3, time: 3, data: { turn: 1, reason: { kind: 'completed' } } }),
+    ].join('\n') + '\n'
+
+    expect(scanLog(Buffer.from(logText)).events.map(event => [event.type, event.seq])).toEqual([
+      ['turn/start', 0],
+      ['step/start', 1],
+      ['step/end', 2],
+      ['turn/end', 3],
+    ])
+  })
+
+  it('scanLog: keeps a packed continuation that starts at the recovery branch', () => {
+    const logText = [
+      JSON.stringify({ type: 'session', version: 0, id: 'packed-continued-writer', createdAt: 1, delegationDepth: 0 }),
+      JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+      JSON.stringify({ type: 'step/start', seq: 1, time: 2, data: { turn: 1, step: 1 } }),
+      JSON.stringify({ type: 'step/end', seq: 2, time: 2, data: { turn: 1, step: 1 } }),
+      JSON.stringify({ type: 'turn/end', seq: 3, time: 2, data: { turn: 1, reason: { kind: 'interrupted' } } }),
+      JSON.stringify({ type: 'session/end-seed', seq: 4, time: 3, data: {} }),
+      JSON.stringify({
+        type: 'text-chunks', seq0: 2, time0: 4,
+        data: { turn: 1, step: 1, index: 0, dt: [1, 1], texts: ['a', 'b', 'c'] },
+      }),
+      JSON.stringify({ type: 'step/end', seq: 5, time: 7, data: { turn: 1, step: 1 } }),
+      JSON.stringify({ type: 'turn/end', seq: 6, time: 7, data: { turn: 1, reason: { kind: 'completed' } } }),
+    ].join('\n') + '\n'
+
+    const events = scanLog(Buffer.from(logText)).events
+    expect(events.map(event => event.seq)).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(events.filter(event => event.type === 'assistant/chunk').map(event => event.data.chunk)).toEqual([
+      { type: 'text-delta', index: 0, text: 'a' },
+      { type: 'text-delta', index: 0, text: 'b' },
+      { type: 'text-delta', index: 0, text: 'c' },
+    ])
+  })
+
+  it.each([
+    ['a mismatched step closer', { type: 'step/end', seq: 1, time: 1, data: { turn: 2, step: 1 } }],
+    ['an unrelated event', { type: 'todo/write', seq: 1, time: 1, data: { todos: [] } }],
+  ])('scanLog: does not supersede recovery preceded by %s', (_label, branchEvent) => {
+    const logText = [
+      JSON.stringify({ type: 'session', version: 0, id: 'unsafe-recovery-conflict', createdAt: 1, delegationDepth: 0 }),
+      JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+      JSON.stringify(branchEvent),
+      JSON.stringify({ type: 'turn/end', seq: 2, time: 1, data: { turn: 1, reason: { kind: 'interrupted' } } }),
+      JSON.stringify({ type: 'assistant/chunk', seq: 1, time: 2, data: {
+        turn: 1, step: 1, chunk: { type: 'block-start', index: 0, blockType: 'text' },
+      } }),
+      JSON.stringify({ type: 'turn/end', seq: 2, time: 3, data: { turn: 1, reason: { kind: 'completed' } } }),
+    ].join('\n') + '\n'
+
+    expect(() => scanLog(Buffer.from(logText))).toThrow(/seq conflict in committed region/)
+  })
+
+  it.each([
+    ['a negative sequence', -1],
+    ['a non-integer sequence', 2.5],
+  ])('scanLog: reports corruption for %s reaching the recovery-suffix test', (_label, seq) => {
+    const logText = [
+      JSON.stringify({ type: 'session', version: 0, id: 'malformed-recovery-seq', createdAt: 1, delegationDepth: 0 }),
+      JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+      JSON.stringify({ type: 'tool/result', seq: 1, time: 2, data: {
+        turn: 1, step: 1,
+        message: { id: 'recovery', role: 'user', source: { kind: 'tool', callId: 'c' }, content: [] },
+        error: { name: 'RecoveryError', code: 'TOOL_NOT_STARTED' },
+      } }),
+      JSON.stringify({ type: 'turn/end', seq: 2, time: 2, data: { turn: 1, reason: { kind: 'interrupted' } } }),
+      JSON.stringify({ type: 'turn/end', seq, time: 3, data: { turn: 1, reason: { kind: 'completed' } } }),
+    ].join('\n') + '\n'
+
+    expect(() => scanLog(Buffer.from(logText))).toThrow(/seq gap in committed region/)
+  })
+
   it('scanLog: rejects a conflicting duplicated sequence in committed history', () => {
     const logText = [
       JSON.stringify({ type: 'session', version: 0, id: 'overlap-conflict', createdAt: 1, delegationDepth: 0 }),
