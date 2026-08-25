@@ -253,6 +253,10 @@
     - id: ui-permission
       name: '@deepseek-ai/dsh-client-ui-permission-presets'
 
+    # Green accent theme: toggles logo-green brand tokens from the settings row.
+    - id: ui-theme-green
+      name: '@deepseek-ai/dsh-client-ui-theme-green'
+
     # The agent-preset row in General settings: the default preset for
     # sessions created later. Absent a roster it renders nothing.
     - id: ui-agent-preset
