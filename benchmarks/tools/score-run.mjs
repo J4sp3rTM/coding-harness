@@ -5,8 +5,10 @@
  * scoring copy of the run workspace (tests were never visible to the agent) and the
  * language's standard test runner decides pass/fail by exit code.
  *
- * Docker-mode tasks (terminal-bench-core, swebench-verified) are marked
- * `requires-docker` until run on a Docker host via terminal-bench's own runner.
+ * Docker-mode tasks (terminal-bench-core, swebench-verified): tests are copied into
+ * the still-running task container and its packaged run-tests.sh decides; swebench
+ * additionally prints a PASSED/FAILED marker that takes precedence over exit code.
+ * The container is removed after scoring either way.
  *
  * Usage:
  *   node benchmarks/tools/score-run.mjs [<runId-substring>]   # default: all runs
@@ -93,6 +95,35 @@ async function scoreNative(taskDir, workspace, language) {
   }
 }
 
+/** Runs the task's own run-tests.sh inside the still-running container, then removes it. */
+async function scoreDocker(taskDir, runDir, containerName) {
+  const exists = await runCommand('docker', ['container', 'inspect', containerName], { timeoutMs: 30_000 })
+  if (exists.status !== 'completed') return { status: 'no-container' }
+  await runCommand('docker', ['exec', containerName, 'mkdir', '-p', '/tmp/bench-tests'], { timeoutMs: 30_000 })
+  const cpTests = await runCommand('docker', ['cp', `${join(taskDir, 'tests')}/.`, `${containerName}:/tmp/bench-tests`], { timeoutMs: 120_000 })
+  if (cpTests.status !== 'completed') return { status: 'scoring-error', detail: cpTests.stderr }
+  if (existsSync(join(taskDir, 'run-tests.sh'))) {
+    const cpScript = await runCommand('docker', ['cp', join(taskDir, 'run-tests.sh'), `${containerName}:/tmp/run-tests.sh`], { timeoutMs: 60_000 })
+    if (cpScript.status !== 'completed') return { status: 'scoring-error', detail: cpScript.stderr }
+  } else {
+    return { status: 'unsupported', detail: 'docker task without run-tests.sh' }
+  }
+  const outcome = await runCommand(
+    'docker',
+    ['exec', containerName, 'bash', '-lc', 'export TEST_DIR=/tmp/bench-tests; bash /tmp/run-tests.sh'],
+    { timeoutMs: 40 * 60_000 },
+  )
+  // SWE-bench packaged tasks report their verdict between marker lines; trust it over exit codes.
+  let status = outcome.status === 'completed' ? 'passed' : 'failed'
+  if (/SWEBench results starts here\s*\nPASSED/.test(outcome.stdout)) status = 'passed'
+  if (/SWEBench results starts here\s*\nFAILED/.test(outcome.stdout)) status = 'failed'
+  writeFileSync(join(runDir, 'test-output.log'), outcome.stdout.slice(-20_000))
+  // Tear down the whole compose project (helper services and volumes included).
+  await runCommand('docker', ['compose', '-p', containerName, '-f', join(taskDir, 'docker-compose.yaml'), 'down', '--volumes', '--remove-orphans'], { timeoutMs: 120_000 })
+  await runCommand('docker', ['rm', '-f', containerName], { timeoutMs: 60_000 })
+  return { status, exitCode: outcome.exitCode, detail: outcome.stderr.slice(-2_000) }
+}
+
 const filter = process.argv[2]
 const manifest = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'))
 const taskById = new Map(manifest.tasks.map(task => [`${task.dataset}/${task.id}`, task]))
@@ -112,7 +143,13 @@ for (const entry of readdirSync(RESULTS_DIR, { withFileTypes: true }).sort((a, b
 
   let score
   if (task.executionMode === 'docker') {
-    score = { status: 'requires-docker' }
+    const containerName = result.containerName
+    if (containerName === undefined || containerName === null) {
+      score = { status: 'no-container' }
+    } else {
+      console.log(`scoring ${entry.name} in container ${containerName}`)
+      score = await scoreDocker(join(DATASETS_DIR, task.dataset, task.id), join(RESULTS_DIR, entry.name), containerName)
+    }
   } else {
     const workspace = join(RESULTS_DIR, entry.name, 'workspace')
     if (!existsSync(workspace)) {
