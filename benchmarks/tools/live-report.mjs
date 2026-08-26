@@ -41,9 +41,12 @@ for (const r of runs) {
 let tableRows = ''
 for (const [key, { list }] of [...cells.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
   const done = list.filter(r => r.status === 'completed')
-  const passed = list.filter(strictPass).length
+  const scored = done.filter(r => r.score !== undefined)
+  const passed = scored.filter(strictPass).length
+  const failed = scored.filter(r => !strictPass(r)).length
+  const pending = done.length - scored.length
   const mins = median(done.map(r => (r.durationMs ?? 0) / 60_000))
-  tableRows += `<tr><td>${esc(key)}</td><td>${list.length}</td><td>${done.length}</td><td class="pass">${passed}</td><td class="fail">${done.length - passed}</td><td>${mins === null ? '—' : mins.toFixed(1)}</td></tr>`
+  tableRows += `<tr><td>${esc(key)}</td><td>${list.length}</td><td>${done.length}</td><td class="pass">${passed}</td><td class="fail">${failed}</td><td class="pending">${pending}</td><td>${mins === null ? '—' : mins.toFixed(1)}</td></tr>`
 }
 
 const byStatus = {}
@@ -70,7 +73,7 @@ const html = `<!doctype html>
  table { border-collapse: collapse; margin-top: .5rem; }
  td, th { padding: .35rem .8rem; border-bottom: 1px solid #333; text-align: left; font-size: .85rem; }
  th { color: #9ab; }
- .pass { color: #6f6; } .fail { color: #f76; }
+ .pass { color: #6f6; } .fail { color: #f76; } .pending { color: #fb6; }
  .bar { background: #333; height: 14px; width: 420px; border-radius: 7px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: .7rem; }
  .bar > div { background: #4a9; height: 100%; }
  .chip { display: inline-block; background: #222; border: 1px solid #444; border-radius: 10px; padding: .15rem .6rem; margin: .15rem; font-size: .78rem; }
@@ -81,7 +84,7 @@ const html = `<!doctype html>
 <p class="meta">regenerated ${new Date().toLocaleTimeString()} · page auto-refreshes every 30s</p>
 <h2>Status breakdown</h2><div>${statusHtml}</div>
 <h2>Per dataset × harness</h2>
-<table><tr><th>cell</th><th>runs</th><th>completed</th><th>strict-pass</th><th>failed</th><th>median min</th></tr>${tableRows}</table>
+<table><tr><th>cell</th><th>runs</th><th>completed</th><th>passed</th><th>failed</th><th>pending-score</th><th>median min</th></tr>${tableRows}</table>
 <h2>Slowest completed runs</h2>
 <table><tr><th>run</th><th>status</th><th>score</th><th>min</th></tr>
 ${recent.map(r => `<tr><td>${esc(r.runId.slice(0, 70))}</td><td>${esc(r.status)}</td><td>${esc(r.score?.status ?? '—')}</td><td>${((r.durationMs ?? 0) / 60000).toFixed(1)}</td></tr>`).join('\n')}
