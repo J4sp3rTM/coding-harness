@@ -2,7 +2,7 @@
 
 [English](llm-streaming.md) | 中文
 
-[`packages/llm`](../../packages/llm/README.md) 提供对话、流式输出与订阅认证类型：每个请求和持久历史共用的 `Message`/`ContentBlock` 变体、完整组装的模型请求、原始 `StreamChunk` 协议、每个适配器必须实现的适配器约定（adapter contract）、订阅登录服务，以及共享的 assembler。[核心包](core.md)在每个轮次持有并记录对话值；本页声明共享的 LLM 类型。
+[`packages/llm`](../../packages/llm/README.md) 提供对话、流式输出与订阅认证类型：每个请求和持久历史共用的 `Message`/`ContentBlock` 变体、完整组装的模型请求、原始 `StreamChunk` 协议、每个适配器必须实现的适配器约定（adapter contract）、订阅登录服务、最近一次观察到的提供方配额记录，以及共享的 assembler。[核心包](core.md)在每个轮次持有并记录对话值；本页声明共享的 LLM 类型。
 
 源码：[`packages/llm/llm/src/types.ts`](../../packages/llm/llm/src/types.ts)
 
@@ -325,6 +325,49 @@ interface TokenUsage {
   cacheWriteTokens?: number
   reasoningTokens?: number
 }
+```
+
+## 提供方状态
+
+`ctx.providerStatus` 是按提供商路由保存最近一次限流观察的宿主进程内临时存储。适配器发布已解析的标头；`/usage` 按接收方代理的活动路由查询最新记录。缺失的服务、不可用记录或尚无观察的路由都不贡献配额行。
+
+```ts type-equiv
+/** One dimension's last-reported limit/remaining pair, with an optional reset time. */
+interface ProviderQuotaDimensionSnapshot {
+  /** The measured quota axis. */
+  dimension: ProviderQuotaDimension
+  /** The provider-reported ceiling for this window; a positive finite number. */
+  limit: number
+  /** The provider-reported remaining allowance; a finite non-negative number. */
+  remaining: number
+  /**
+   * Epoch milliseconds when the provider window resets, when the provider
+   * documents and sends a parseable value. Absent means "unknown", never zero.
+   */
+  reset?: number
+}
+```
+
+```ts type-equiv
+/**
+ * The opaque non-secret identity of the credential/configuration a snapshot
+ * was observed under — a credential reference name or equivalent label, never
+ * key material. Records carry it so diagnostics can tell two configurations
+ * of one route apart.
+ */
+interface ProviderStatusPublication {
+  /** Harness provider route the observation belongs to. */
+  routeId: string
+  /** Non-secret credential/configuration label, when the caller knows one. */
+  credentialIdentity?: string
+}
+```
+
+```ts type-equiv
+/** What `lookup` answers: the latest observation for one route, of either kind. */
+type ProviderStatusRecord =
+  | ({ kind: 'snapshot' } & ProviderStatusSnapshot)
+  | ({ kind: 'unavailable' } & ProviderStatusUnavailable)
 ```
 
 <a id="blockassembler"></a>
@@ -783,6 +826,24 @@ declare abstract class LlmAdapter {
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — this section is byte-identical in both language sides of the page. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxdeepseekaccount--deepseekaccountbalance"></a>
+
+### `ctx.deepseekAccount` — `DeepSeekAccountBalance`
+
+Account-balance lookups for the routes this plugin serves, published for optional consumers such as `/usage`.
+
+```ts cordis-catalog
+/**
+ * Resolve one route's remaining prepaid balance in USD.
+ * @param provider - registered provider route to ask about; routes this plugin does not serve answer `undefined`.
+ * @param signal - cancellation for the underlying request.
+ * @returns the remaining USD amount, or `undefined` when the route is not served here or the balance cannot be resolved.
+ */
+remainingUsd(provider: string, signal?: AbortSignal): Promise<number | undefined>
+```
+
+Source: [`packages/llm/llm-deepseek/src/index.ts:42`](../../packages/llm/llm-deepseek/src/index.ts)
+
 <a id="ctxllm--llmruntime"></a>
 
 ### `ctx.llm` — `LlmRuntime`
@@ -985,6 +1046,42 @@ register(contributor: RequestRetryContributor): () => void
 ```
 
 Source: [`packages/llm/llm-retry/src/index.ts:149`](../../packages/llm/llm-retry/src/index.ts)
+
+<a id="ctxproviderstatus--providerstatus"></a>
+
+### `ctx.providerStatus` — `ProviderStatus`
+
+Host-process store of the last status observation per route. One record per route at a time: each publication replaces the previous one, so `lookup` always answers with the freshest observation regardless of which configuration produced it. Records are frozen detached copies.
+
+```ts cordis-catalog
+/**
+ * Commit one quota snapshot as the latest observation for its route.
+ * Dimensions and plan windows are validated before anything is stored; a
+ * rejected publication leaves the previously stored record serving.
+ * @param publication - the route, optional non-secret credential identity, and parsed quota measurements.
+ * @throws when any field is outside its documented domain.
+ */
+recordSnapshot(publication: ProviderStatusPublication & { /** Fully parsed dimensions; each named once. */ dimensions?: readonly ProviderQuotaDimensionSnapshot[] /** Subscription allowance windows; each labeled once. */ windows?: readonly ProviderPlanWindowSnapshot[] }): void
+
+/**
+ * Commit an explicit unavailable state as the latest observation for its
+ * route. Use this when a response carried recognized status fields whose
+ * values were all unusable; a response with no recognizable fields is
+ * simply not published.
+ * @param publication - the route, optional non-secret credential identity, and why nothing usable was parsed.
+ * @throws when any field is outside its documented domain.
+ */
+recordUnavailable(publication: ProviderStatusPublication & { /** Why no usable dimensions could be parsed; never quotes credential material. */ reason: string }): void
+
+/**
+ * Read the latest observation for one route.
+ * @param routeId - harness provider route to look up.
+ * @returns the frozen latest record, or `undefined` before the first publication.
+ */
+lookup(routeId: string): ProviderStatusRecord | undefined
+```
+
+Source: [`packages/llm/provider-status/src/index.ts:113`](../../packages/llm/provider-status/src/index.ts)
 
 <a id="llm-events"></a>
 

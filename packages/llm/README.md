@@ -11,6 +11,8 @@ The LLM seam and its provider adapters. The `llm` package owns both the Service 
 | [`llm-retry/`](llm-retry/README.md) | Provider-scoped retry policy | listens to `agent/request-error` |
 | [`llm-deepseek/`](llm-deepseek/README.md) | Direct DeepSeek adapter | registers on `ctx.llm` |
 | [`llm-pi-ai/`](llm-pi-ai/README.md) | Multi-provider pi-ai adapter | registers on `ctx.llm` |
+| [`provider-status/`](provider-status/README.md) | Last-observed provider quota snapshots | `ctx.providerStatus` |
+| [`command-usage/`](command-usage/README.md) | Human `/usage` token, quota, and balance report | registers commands |
 | [`llm-oauth/`](llm-oauth/README.md) | Subscription sign-in seam | `ctx.llmOAuth` |
 | [`llm-oauth-local/`](llm-oauth-local/README.md) | File-backed token store and catalog sign-in flows | registers `ctx.llmOAuth` |
 | [`command-login/`](command-login/README.md) | Human `/login` and `/logout` | registers commands |
