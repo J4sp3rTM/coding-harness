@@ -175,6 +175,10 @@ for (const entry of readdirSync(RESULTS_DIR, { withFileTypes: true }).sort((a, b
   const resultPath = join(RESULTS_DIR, entry.name, 'result.json')
   if (!existsSync(resultPath)) continue
   const result = JSON.parse(readFileSync(resultPath, 'utf8'))
+  if (result.status === 'container-error') {
+    console.log(`skip ${entry.name} (run never produced an environment; delete its dir to re-run)`)
+    continue
+  }
   if (result.score !== undefined) {
     console.log(`skip ${entry.name} (already scored: ${result.score.status})`)
     continue
