@@ -38,6 +38,24 @@ export type { DeepSeekAdapterOptions, DeepSeekCatalogModel, DeepSeekConnectionOp
 export type { RequestDefaults } from './serialize.ts'
 export type * from './types.ts'
 
+/** Account-balance lookups for the routes this plugin serves, published for optional consumers such as `/usage`. */
+export interface DeepSeekAccountBalance {
+  /**
+   * Resolve one route's remaining prepaid balance in USD.
+   * @param provider - registered provider route to ask about; routes this plugin does not serve answer `undefined`.
+   * @param signal - cancellation for the underlying request.
+   * @returns the remaining USD amount, or `undefined` when the route is not served here or the balance cannot be resolved.
+   */
+  remainingUsd(provider: string, signal?: AbortSignal): Promise<number | undefined>
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Optional balance capability provided by dsh-llm-deepseek; read through `ctx.get('deepseekAccount')`. */
+    deepseekAccount: DeepSeekAccountBalance
+  }
+}
+
 export const name = 'llm-deepseek'
 export const inject = ['llm']
 
@@ -248,6 +266,27 @@ export function apply(ctx: Context, config: Config): void {
   let userId: AnonymousUserId | undefined
   const resolveUserId = (): AnonymousUserId => userId ??= getOrCreateAnonymousUserId()
   const adapter = new DeepSeekAdapter({ options, resolveApiKey, resolveUserId })
+  /**
+   * The optional balance capability: one live lookup per ask, answered from
+   * this plugin's own adapter so endpoint, credential resolution, and
+   * redirect hygiene stay in exactly one place. Any failure — a route this
+   * plugin does not serve, a missing key, transport trouble, an unusable
+   * body — answers `undefined`, which is the consumer's cue to render
+   * nothing; a balance line that lies or a failed command would both be worse.
+   */
+  ctx.effect(() => ctx.provide('deepseekAccount', {
+    remainingUsd: async (provider: string, signal?: AbortSignal): Promise<number | undefined> => {
+      if (provider !== PROVIDER) return undefined
+      try {
+        const balance = await adapter.fetchBalance(signal)
+        return balance.available ? balance.remainingUsd : undefined
+      } catch (_balanceFailure) {
+        // Balance reporting is best-effort decoration for /usage; every
+        // failure mode above is already diagnosable at its own layer.
+        return undefined
+      }
+    },
+  }), 'llm-deepseek account-balance capability')
   ctx.llm.registerConfigurableProviders([
     { provider: PROVIDER, displayName: 'DeepSeek', settingsNs: NS, settingsPath: [] },
   ])

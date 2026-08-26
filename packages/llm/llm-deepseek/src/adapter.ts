@@ -70,6 +70,45 @@ export interface DeepSeekConnectionOptions {
   retryPolicy: ResolvedRetryPolicy
 }
 
+/** Validated facts from one account-balance response. */
+export interface DeepSeekBalanceSnapshot {
+  /** Whether the endpoint reports the account as currently able to make calls (`is_available`). */
+  available: boolean
+  /** Remaining prepaid balance in USD parsed from the endpoint's balance list. */
+  remainingUsd: number
+}
+
+/**
+ * Validate one account-balance payload at the wire boundary. The endpoint is
+ * documented to answer `{ is_available, balance_infos: [{ currency, balance }] }`;
+ * anything else — a missing flag, no USD entry, an unparseable amount — refuses
+ * rather than rendering a guess.
+ */
+function validateBalancePayload(payload: unknown): DeepSeekBalanceSnapshot {
+  if (typeof payload !== 'object' || payload === null || !('is_available' in payload)) {
+    throw new LlmError('DeepSeek balance endpoint omitted is_available', 'EMPTY_RESPONSE')
+  }
+  const { is_available: available, balance_infos: infos } = payload as {
+    is_available?: unknown
+    balance_infos?: unknown
+  }
+  if (typeof available !== 'boolean' || !Array.isArray(infos)) {
+    throw new LlmError('DeepSeek balance endpoint answered an unusable shape', 'EMPTY_RESPONSE')
+  }
+  const usd = infos.find((entry): entry is { currency: string; balance: string } =>
+    typeof entry === 'object' && entry !== null
+    && (entry as { currency?: unknown }).currency === 'USD')
+  if (usd === undefined || typeof usd.balance !== 'string') {
+    throw new LlmError('DeepSeek balance endpoint listed no USD balance', 'EMPTY_RESPONSE')
+  }
+  const trimmed = usd.balance.trim()
+  const remainingUsd = trimmed.length === 0 ? Number.NaN : Number(trimmed)
+  if (!Number.isFinite(remainingUsd) || remainingUsd < 0) {
+    throw new LlmError('DeepSeek balance endpoint reported an unusable USD amount', 'EMPTY_RESPONSE')
+  }
+  return { available, remainingUsd }
+}
+
 /** Constructor options for {@link DeepSeekAdapter}: the operation-local resolution hooks the plugin owns. */
 export interface DeepSeekAdapterOptions {
   /** Current validated connection facts; called once per operation. */
@@ -164,6 +203,60 @@ export class DeepSeekAdapter extends LlmAdapter {
 
   override providerInfo(provider: string): LlmProviderInfo {
     return { id: provider, name: 'DeepSeek' }
+  }
+
+  /**
+   * Fetch the documented DeepSeek account-balance summary with this
+   * connection's resolved credential. Redirect responses fail closed — the
+   * request is issued with `redirect: 'error'` and an explicit 3xx refusal —
+   * so a balance lookup can never be silently re-targeted to another origin.
+   * @param signal - cancellation for the network call.
+   * @returns validated balance facts.
+   * @throws {LlmError} `MISSING_CREDENTIAL` when no key resolves; `TRANSPORT`
+   * on network failure or a refused redirect; provider-mapped codes
+   * (`AUTH`, `RATE_LIMIT`, `SERVER`, `HTTP_*`) on non-2xx replies;
+   * `EMPTY_RESPONSE` when the body carries no usable USD balance entry.
+   */
+  async fetchBalance(signal?: AbortSignal): Promise<DeepSeekBalanceSnapshot> {
+    const connection = this.config.options()
+    const apiKey = await this.config.resolveApiKey(connection)
+    let response: Response
+    try {
+      response = await fetch(`${connection.baseURL}/user/balance`, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
+        redirect: 'error',
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error: unknown) {
+      if (signal?.aborted) {
+        throw new LlmError('DeepSeek balance request aborted by caller', 'ABORTED', { cause: error })
+      }
+      // With redirects refused client-side, a cross-origin hop surfaces here
+      // rather than as a response; the endpoint stays exactly where the
+      // configuration named it.
+      throw new LlmError(
+        `DeepSeek balance request to ${connection.baseURL} failed`,
+        'TRANSPORT',
+        { cause: error },
+      )
+    }
+    if (response.status >= 300 && response.status < 400) {
+      throw new LlmError(
+        `DeepSeek balance request was redirected (HTTP ${response.status}); refusing to follow`,
+        'TRANSPORT',
+      )
+    }
+    if (!response.ok) {
+      throw new LlmError(`DeepSeek balance error (HTTP ${response.status})`, httpErrorCode(response.status))
+    }
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch {
+      throw new LlmError('DeepSeek balance endpoint returned a non-JSON body', 'EMPTY_RESPONSE')
+    }
+    return validateBalancePayload(payload)
   }
 
   override providerRetryPolicy(_provider: string): ResolvedRetryPolicy {

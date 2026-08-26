@@ -147,6 +147,10 @@ profile 的 `models` 列表是*替换*该路由已安装 catalog，而不是扩�
 
 多数列表只公布 id；`context_window`/`context_length` 与 `max_output_tokens`/`max_tokens` 在网关提供时会被读取，没有可用 id 的条目会被跳过而不是让整份列表失败，其余仍由采纳方补齐。回复在四兆字节上限下读取，且上限落在实际收到的字节上——端点是用户自己填的 URL，因此会先看声明长度，但绝不把它当作边界。端点不可达、凭据被拒、响应非 JSON、以及响应没有 `data` 数组，都会以 `DISCOVERY_FAILED` 失败，消息点名端点；仅当 401 或 403 时才点名凭据。读取响应体期间被取消会呈现为 `ABORTED`，与请求发出之前被取消一致。
 
+## 提供方状态观察
+
+当可选的 [`ctx.providerStatus`](../provider-status/README.md) 服务在组合中时，适配器会发布每次成功响应的成文标头所披露的路由配额信息。OpenAI 的 `x-ratelimit-*` 与 Anthropic 的 `anthropic-ratelimit-*` 字段变成按维度的 limit/remaining 对；Anthropic OAuth unified utilization 与 OpenAI Codex OAuth used-percent 字段则变成带提供方重置时间的订阅计划窗口。其余标头一律忽略；可识别字段取值全部不可解析时记录显式的不可用状态，而响应不含任何可识别字段时不发布任何内容。这一观察只是请求旁边的参考性记录：观察者失败绝不会让模型调用失败，未组合该服务时一切保持不变。
+
 ## 提供方／模型路由与回放
 
 每次解析产出一份**不可变**快照——profiles 加上一个持有各路由所建 `Provider` 的 `createModels()` 集合——每个操作都在自己第一个 `await` 之前整体捕获一份快照。配置变化会构造**新**集合，而不是改动正在被使用的那个：`Models.streamSimple()` 是惰性的，它在流首次被消费时才解析 provider，而那已在 credential await 之后，因此改动共享集合会让一个在旧配置下开始的请求在新配置下结束，或者撞上一个已不存在的 provider。这正是 seam 的每步调用冻结（`llm.prepareCall()`）能贯通到底的原因——回复途中切换模型会在下一步生效，绝不会影响在途的那一步。请求经 `Models.streamSimple()` 抵达提供方。保持 catalog 协议不变的 catalog 路由会**复用**已安装提供方，只替换其模型列表，因为该提供方持有本包无法重建的 API 实现——Bedrock 经由独立入口加载其 Smithy 模块——从零件重建会静默收窄可用提供方的范围。其余路由都由 `createProvider()` 基于 `supportedProtocols()` 背后的协议表构造，表中条目正是 pi-ai 自己的提供方工厂所用的同一批 factory。
@@ -209,7 +213,9 @@ pi-ai 事件会变为 harness 推理、文本、工具调用、usage 与 finish 
 
 ## 已知限制与暂缓事项
 
+- **空路由启动是 debug，不是 stderr**：`reportRoutes()` 把普通的首次运行空状态（`subscription sign-ins: (none)`、没有已注册路由）记到 debug，让 stderr 继续作为错误通道。已配置路由记 info；已登录但没有模型的订阅记 warn。
 - **订阅路由需要组合登录 seam**：pi-ai 的 OAuth 只从*已存储*的凭据解析，且没有任何环境发现路径，因此本适配器的集合经由 `ctx.llmOAuth` 读取。未组合登录服务的部署把每条路由都留在 key 路径上，而只有 OAuth 一种方法的路由（已安装 catalog 中即 `openai-codex`）在那里会以 `Provider is not configured` 失败。只有 catalog 为其附带 OAuth 方法的路由才谈得上登录：手工声明的网关没有流程，因此在它上面写 `auth: subscription` 会在写入处被拒绝。
+- **Codex 计划标头仅在 SSE 可见**：pi-ai 只在 SSE 传输中暴露 `x-codex-*` 计划标头。默认 WebSocket 传输不会产生 HTTP 响应，因此无法在那里观察 Codex 计划窗口；适配器不更改默认值。
 - **提供方自带的凭据发现只读进程环境**：不指定凭据的路由交由 catalog 提供方自行解析，而它探测的是环境变量（`AZURE_OPENAI_API_KEY`、`AWS_PROFILE`、`AWS_ACCESS_KEY_ID` 以及各提供方自己的那一组）。它不读任何本地凭据目录，因此只有 `~/.aws/credentials` 而未导出 `AWS_PROFILE` 会被解析为未配置；由 harness 凭据 seam 保管的值，除非进程环境里也有，否则对它不可见。
 - **settings 能新增或覆盖路由，但不能移除组合路由**：用户层合并在组合 `base` 之上，因此删除 `cordis.yml` 提供的提供方属于组合变更；对该 namespace 执行 `replace` 只会重置用户层。
 - **分层合并对字典键没有删除语义**：settings seam 把组合 `base` 与用户层按键递归合并，因此 base 声明的某个 `reasoningEfforts` 档位、`modelOverrides` 条目或 `compat` 字段，用户层只能覆盖、无法移除——而 `reasoningEfforts` 里缺席本身*就是*语义（「不提供」），于是 base 声明过的档位会一直被提供。只有 `cordis.yml` entry config 为用户层正在编辑的同一模型声明了按模型推理字段才会触发；受支持的姿态是把这些字段留给 settings 文档（shipped 组合以 dormant 方式挂载该适配器），且 `models` 列表是数组、整体替换，这是带内的解决办法。

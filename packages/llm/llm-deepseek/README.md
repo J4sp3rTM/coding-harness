@@ -58,6 +58,10 @@ The one registration-captured fact is the retry policy: when its resolved value 
 
 The plugin also declares its route in the configurable-provider directory (`ctx.llm.listConfigurableProviders()`): provider `deepseek-official`, settings namespace `llm-deepseek`, empty settings path — the whole section is the profile. Configuration surfaces use that entry to offer this adapter alongside dormant pi-ai providers.
 
+## Account balance
+
+The adapter also serves the documented `GET {base}/user/balance` endpoint with the same per-request credential resolution the stream path uses, and publishes that lookup as the optional `ctx.get('deepseekAccount')` capability: `remainingUsd(provider, signal)` answers the remaining USD amount for `deepseek-official`, and `undefined` for any other route, for an account flagged unavailable, or whenever anything fails — a missing key, transport trouble, a body without a usable USD entry. Redirects fail closed (`redirect: 'error'` plus an explicit 3xx refusal), so a balance ask can never be silently re-targeted to another origin. The capability performs one live call per ask; nothing is cached or pushed, and consumers decide when — if ever — to render the figure.
+
 ## App attribution
 
 Every request carries the shared attribution header from dsh-llm's `attributionHeaders()` - the mandatory `User-Agent` baseline identifying the harness (see [dsh-llm § App attribution](../llm/README.md#app-attribution-attributionts)). Direct DeepSeek requests and OpenAI-compatible gateway requests get no provider-specific app-attribution headers under this adapter contract; OpenRouter app attribution is deferred to a future explicit OpenRouter adapter or mode. A request whose `GenerateOptions.purpose` is `compaction` (dsh-compaction-basic's auxiliary summarization call) additionally carries `x-deepseek-harness-compact: 1`, so the host can separate compaction traffic from conversation requests.

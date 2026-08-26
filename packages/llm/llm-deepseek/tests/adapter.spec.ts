@@ -6,6 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import LlmRuntime, { createUserMessage,
   CONTEXT_WINDOW_EXCEEDED_CODE,
+  LlmError,
   ProviderRequestId,
   QUOTA_EXCEEDED_CODE,
   ReasoningEffortId,
@@ -597,6 +598,134 @@ describe('DeepSeekAdapter against a mock server', () => {
     } finally {
       fetchSpy.mockRestore()
     }
+  })
+})
+
+describe('DeepSeekAdapter.fetchBalance against a mock server', () => {
+  it('reads the documented user/balance endpoint with the resolved credential', async () => {
+    const server = await mockServer([{
+      kind: 'json',
+      payload: { is_available: true, balance_infos: [{ currency: 'USD', balance: '103.50' }] },
+    }])
+    const adapter = adapterOf({ baseURL: server.url })
+    await expect(adapter.fetchBalance(new AbortController().signal))
+      .resolves.toEqual({ available: true, remainingUsd: 103.5 })
+    expect(server.headers[0]?.authorization).toBe('Bearer k')
+    expect(server.requests[0]).toBeUndefined()
+  })
+
+  it('reports an unavailable account without inventing an amount', async () => {
+    const server = await mockServer([{
+      kind: 'json',
+      payload: { is_available: false, balance_infos: [{ currency: 'USD', balance: '0.02' }] },
+    }])
+    const adapter = adapterOf({ baseURL: server.url })
+    await expect(adapter.fetchBalance()).resolves.toEqual({ available: false, remainingUsd: 0.02 })
+  })
+
+  it.each([
+    ['missing flag', {}],
+    ['non-boolean flag', { is_available: 'yes', balance_infos: [] }],
+    ['no balance list', { is_available: true }],
+    ['no USD entry', { is_available: true, balance_infos: [{ currency: 'CNY', balance: '8.00' }] }],
+    ['unparseable amount', { is_available: true, balance_infos: [{ currency: 'USD', balance: 'lots' }] }],
+    ['negative amount', { is_available: true, balance_infos: [{ currency: 'USD', balance: '-1' }] }],
+    ['blank amount', { is_available: true, balance_infos: [{ currency: 'USD', balance: '   ' }] }],
+  ])('refuses an unusable payload (%s) as EMPTY_RESPONSE', async (_label, payload) => {
+    const server = await mockServer([{ kind: 'json', payload }])
+    const adapter = adapterOf({ baseURL: server.url })
+    await expect(adapter.fetchBalance()).rejects.toMatchObject({ code: 'EMPTY_RESPONSE' })
+  })
+
+  it('refuses a non-JSON success body as EMPTY_RESPONSE', async () => {
+    const server = await mockServer([{ kind: 'http-error', status: 200, body: '<html>gateway</html>', contentType: 'text/html' }])
+    const adapter = adapterOf({ baseURL: server.url })
+    await expect(adapter.fetchBalance()).rejects.toMatchObject({ code: 'EMPTY_RESPONSE' })
+  })
+
+  it('maps provider HTTP errors onto harness codes', async () => {
+    const server = await mockServer([{ kind: 'http-error', status: 401, body: '{"error":{"message":"bad key"}}' }])
+    const adapter = adapterOf({ baseURL: server.url })
+    await expect(adapter.fetchBalance()).rejects.toMatchObject({ code: 'AUTH' })
+  })
+
+  it('fails closed on a redirect without contacting the redirect target', async () => {
+    const target = await mockServer([{ kind: 'json', payload: { is_available: true } }])
+    const server = await mockServer([{
+      kind: 'json',
+      status: 302,
+      payload: {},
+      headers: { location: `${target.url}/user/balance` },
+    }])
+    const adapter = adapterOf({ baseURL: server.url })
+    await expect(adapter.fetchBalance()).rejects.toMatchObject({ code: 'TRANSPORT' })
+    // The redirect target was never contacted; only the configured origin answered.
+    expect(target.requests).toHaveLength(0)
+    expect(target.headers).toHaveLength(0)
+  })
+
+  it('classifies a caller abort of the balance request as ABORTED', async () => {
+    const controller = new AbortController()
+    controller.abort('caller gave up')
+    const adapter = adapterOf({ baseURL: 'https://example.invalid' })
+    await expect(adapter.fetchBalance(controller.signal)).rejects.toMatchObject({ code: 'ABORTED' })
+  })
+
+  it('refuses a redirect that a runtime delivers instead of refusing client-side', async () => {
+    // Some fetch implementations surface a 3xx as a response even under
+    // `redirect: 'error'`; the explicit refusal must catch those too.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response(null, { status: 302, headers: { location: 'https://elsewhere.example/user/balance' } })))
+    try {
+      const adapter = adapterOf({ baseURL: 'https://example.invalid' })
+      await expect(adapter.fetchBalance()).rejects.toThrow(/redirected \(HTTP 302\)/)
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
+  it('propagates a missing credential instead of requesting unauthenticated', async () => {
+    const adapter = new DeepSeekAdapter({
+      options: () => resolveAdapterOptions({ baseURL: 'https://example.invalid' }),
+      resolveApiKey: () => Promise.reject(new LlmError('no key anywhere', 'MISSING_CREDENTIAL')),
+      resolveUserId: () => TEST_USER_ID,
+    })
+    await expect(adapter.fetchBalance()).rejects.toMatchObject({ code: 'MISSING_CREDENTIAL' })
+  })
+})
+
+describe('deepseekAccount capability', () => {
+  it('answers the served route with its live USD balance', async () => {
+    const server = await mockServer([{
+      kind: 'json',
+      payload: { is_available: true, balance_infos: [{ currency: 'USD', balance: '12.5' }] },
+    }])
+    const ctx = await harness(server.url)
+    await expect(ctx.get('deepseekAccount')!.remainingUsd('deepseek-official')).resolves.toBe(12.5)
+  })
+
+  it('answers other routes with undefined and never touches the network', async () => {
+    const ctx = await harness('https://example.invalid')
+    await expect(ctx.get('deepseekAccount')!.remainingUsd('openai')).resolves.toBeUndefined()
+  })
+
+  it('stays silent when no key resolves or the endpoint fails', async () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', '')
+    const server = await mockServer([{ kind: 'json', payload: { is_available: true } }])
+    const ctx = await harness(server.url)
+    await expect(ctx.get('deepseekAccount')!.remainingUsd('deepseek-official')).resolves.toBeUndefined()
+    // A second ask after a transport-level failure stays silent too.
+    await closeMockServers()
+    await expect(ctx.get('deepseekAccount')!.remainingUsd('deepseek-official')).resolves.toBeUndefined()
+  })
+
+  it('stays silent when the account cannot serve requests', async () => {
+    const server = await mockServer([{
+      kind: 'json',
+      payload: { is_available: false, balance_infos: [{ currency: 'USD', balance: '1.00' }] },
+    }])
+    const ctx = await harness(server.url)
+    await expect(ctx.get('deepseekAccount')!.remainingUsd('deepseek-official')).resolves.toBeUndefined()
   })
 })
 

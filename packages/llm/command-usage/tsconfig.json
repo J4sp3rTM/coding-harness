@@ -13,6 +13,8 @@
     { "path": "../../runtime-diagnostics/invariants" },
     { "path": "../../llm/token-meter" },
     { "path": "../../llm/llm" },
+    { "path": "../../llm/llm-deepseek" },
+    { "path": "../../llm/provider-status" },
     { "path": "../../core/session" },
     { "path": "../../core/agent" }
   ]

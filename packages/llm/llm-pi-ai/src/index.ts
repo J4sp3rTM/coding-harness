@@ -60,16 +60,19 @@ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { assertUsableApiKey, LlmError } from '@deepseek-ai/dsh-llm'
 import type { AdapterRegistrationHandle, DirectoryRegistrationHandle, LlmConfigurableProvider } from '@deepseek-ai/dsh-llm'
 import type { LlmOAuthTokenStore } from '@deepseek-ai/dsh-llm-oauth'
+// Type-only: resolves the optional provider-status Context declaration.
+import type {} from '@deepseek-ai/dsh-provider-status'
 import { deepEqualJson, installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { PiAiAdapter } from './adapter.ts'
-import type { PiAiRequestAuth } from './adapter.ts'
+import type { PiAiProviderResponseObservation, PiAiRequestAuth } from './adapter.ts'
 import { catalogProviderIds, catalogProviderTakesApiKey, catalogProviderTakesOAuth } from './catalog.ts'
 import { assertServiceable, Config, resolveProfiles } from './config.ts'
 import type { PiAiProviderProfile, ResolvedPiAiProviderProfile } from './config.ts'
 import { discoverModels } from './discovery.ts'
+import { normalizeRateLimitHeaders } from './rate-limits.ts'
 
 export { PiAiAdapter } from './adapter.ts'
-export type { PiAiAdapterOptions, PiAiRequestAuth } from './adapter.ts'
+export type { PiAiAdapterOptions, PiAiProviderResponseObservation, PiAiRequestAuth } from './adapter.ts'
 export { Config } from './config.ts'
 export type {
   PiAiAuthMode,
@@ -283,11 +286,38 @@ export function apply(ctx: Context, config: Config): void {
     return { subscription: false, ...apiKey === undefined ? {} : { apiKey } }
   }
 
+  /**
+   * Publish one completed provider response's rate-limit headers into the
+   * optional provider-status service. The normalizer owns every allowlist and
+   * parsing decision; this fiber only decides where the result goes and stays
+   * silent when the service is not composed.
+   *
+   * Observations arrive for successful responses only — pi-ai reports a
+   * failed HTTP status as an SDK error instead — so quota snapshots always
+   * describe a window the provider actually served.
+   */
+  const onProviderResponse = ({ provider, subscription, credentialIdentity, headers }: PiAiProviderResponseObservation): void => {
+    const statusService = ctx.get('providerStatus')
+    if (statusService === undefined) return
+    const normalized = normalizeRateLimitHeaders(subscription, headers, Date.now())
+    if (normalized === undefined) return
+    const route = {
+      routeId: provider,
+      ...credentialIdentity === undefined ? {} : { credentialIdentity },
+    }
+    if (normalized.kind === 'unavailable') {
+      statusService.recordUnavailable({ ...route, reason: normalized.reason })
+      return
+    }
+    statusService.recordSnapshot({ ...route, dimensions: normalized.dimensions, windows: normalized.windows })
+  }
+
   const adapter = new PiAiAdapter({
     profiles,
     resolveAuth,
     resolveTokens,
     resolveAttachments: () => ctx.get('attachments'),
+    onProviderResponse,
     onReplayDegrade: ({ provider, model, reason }) => {
       ctx.logger.warn(
         `llm-pi-ai: unusable replay state on assistant history for route "${provider}/${model}";`
@@ -404,17 +434,20 @@ export function apply(ctx: Context, config: Config): void {
   /**
    * One line per provider route at startup and after every route change, plus
    * the one diagnosis this adapter can make that a user cannot: a subscription
-   * that is signed in but serves no models. Written at info level because the
-   * absence of a provider is the question users actually arrive with, and it
-   * has no other visible symptom.
+   * that is signed in but serves no models. The ordinary empty state (no
+   * sign-ins, no routes) is debug: it is the first-run default, and writing it
+   * at info leaks onto stderr for every consumer that treats stderr as the
+   * error channel. Configured routes and a signed-in subscription with no
+   * models stay at info/warn because they are the user-visible symptom.
    */
   function reportRoutes(): void {
     const resolved = profiles()
     const signedInList = [...signedInRoutes].sort()
-    ctx.logger.info('llm-pi-ai: subscription sign-ins: %s',
-      signedInList.length === 0 ? '(none)' : signedInList.join(', '))
+    const emptySignIns = signedInList.length === 0
+    ctx.logger[emptySignIns ? 'debug' : 'info']('llm-pi-ai: subscription sign-ins: %s',
+      emptySignIns ? '(none)' : signedInList.join(', '))
     if (resolved.size === 0) {
-      ctx.logger.info('llm-pi-ai: no provider routes registered'
+      ctx.logger.debug('llm-pi-ai: no provider routes registered'
         + ' — sign in with /login, or add a provider on the Models settings page')
       return
     }
