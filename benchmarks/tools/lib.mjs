@@ -9,9 +9,10 @@ export const BENCHMARK_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..'
 export const DATASETS_DIR = join(BENCHMARK_ROOT, 'datasets')
 /**
  * Run records live outside the repository on purpose: an in-repo cwd would expose
- * this repo's own AGENTS.md/CLAUDE.md to both harnesses as ancestor context.
+ * this repo's own AGENTS.md/CLAUDE.md to both harnesses as ancestor context. The
+ * home directory survives reboots, unlike /tmp which a reboot wiped mid-benchmark.
  */
-export const RESULTS_DIR = process.env.DSH_BENCH_RESULTS ?? '/tmp/dsh-bench/results'
+export const RESULTS_DIR = process.env.DSH_BENCH_RESULTS ?? `${process.env.HOME}/dsh-bench/results`
 export const REPO_ROOT = join(BENCHMARK_ROOT, '..')
 
 /** Deterministic sampling seed; change this invalidates every frozen manifest. */
