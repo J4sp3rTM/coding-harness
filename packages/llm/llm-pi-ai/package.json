@@ -39,6 +39,7 @@
     "@deepseek-ai/dsh-launch-environment": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-llm-oauth": "workspace:^",
+    "@deepseek-ai/dsh-provider-status": "workspace:^",
     "@deepseek-ai/dsh-settings": "workspace:^",
     "@deepseek-ai/dsh-timeout": "workspace:^"
   },
@@ -55,6 +56,7 @@
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-llm-deepseek": "workspace:^",
     "@deepseek-ai/dsh-llm-oauth": "workspace:^",
+    "@deepseek-ai/dsh-provider-status": "workspace:^",
     "@deepseek-ai/dsh-settings": "workspace:^",
     "@deepseek-ai/dsh-timeout": "workspace:^"
   }

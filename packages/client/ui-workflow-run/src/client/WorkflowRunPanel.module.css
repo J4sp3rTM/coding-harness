@@ -151,6 +151,14 @@
   min-width: 0;
 }
 
+.steering {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+  min-width: 0;
+  padding: 0;
+}
+
 .members {
   display: flex;
   flex-direction: column;

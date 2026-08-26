@@ -6,6 +6,7 @@ export type Behavior =
   | { kind: 'sse'; events: string[]; delayMs?: number }
   | { kind: 'http-error'; status: number; body: string; contentType?: string; headers?: Record<string, string> }
   | { kind: 'close-early'; events: string[] }
+  | { kind: 'json'; status?: number; payload: unknown; headers?: Record<string, string> }
 
 export interface MockServer {
   url: string
@@ -40,11 +41,20 @@ export async function mockServer(script: Behavior[]): Promise<MockServer> {
     let body = ''
     request.on('data', (chunk: Buffer) => { body += chunk.toString('utf8') })
     request.on('end', () => {
-      requests.push(JSON.parse(body))
+      // GET endpoints (account balance) arrive with no body at all.
+      requests.push(body.length === 0 ? undefined : JSON.parse(body))
       headers.push(request.headers)
       const behavior = script.shift()
       if (!behavior) {
         response.writeHead(500).end('mock script exhausted')
+        return
+      }
+      if (behavior.kind === 'json') {
+        response.writeHead(behavior.status ?? 200, {
+          'content-type': 'application/json',
+          ...behavior.headers,
+        })
+        response.end(JSON.stringify(behavior.payload))
         return
       }
       if (behavior.kind === 'http-error') {

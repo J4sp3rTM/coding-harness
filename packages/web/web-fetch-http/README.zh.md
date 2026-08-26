@@ -17,6 +17,7 @@
 ## 传输卫生
 
 - 只接受 `http:` 和 `https:` URL；拒绝 URL 中的凭据（`WEB_BLOCKED_URL`）以及过长／格式错误的 URL（`WEB_INVALID_URL`）。
+- 在连接前阻止私有网络目标（`WEB_BLOCKED_URL`）：`localhost`／`*.localhost`／`*.local` 名称，IPv4 loopback（127.0.0.0/8）、this-network（0.0.0.0/8）、私有段 10/8、172.16/12、192.168/16、link-local 169.254/16（含云元数据端点 `169.254.169.254`），以及 IPv6 的 loopback／未指定／唯一本地／link-local 类别和内嵌 IPv4 部分被阻止的 IPv4 映射地址。主机名在每次连接前通过 `node:dns` 解析——直接目标与每个重定向目标一视同仁——只要任一解析地址被阻止，整个请求即被拒绝。
 - 强制执行 URL 最大长度、响应字节上限（`WEB_FETCH_TOO_LARGE`）、解码主体字符上限、超时（`WEB_FETCH_TIMEOUT`）和重定向跳数上限。
 - 把调用方的中止信号（`WEB_ABORTED`）传播到网络请求与流式读取。
 - 只跟随**同源**重定向；跨源重定向以 `WEB_REDIRECT_BLOCKED` 失败，要求发起新的工具调用（沿用 Claude Code 的 WebFetch 模式）。
@@ -33,6 +34,7 @@
 | `timeoutMs` | `30_000` | Node 定时器范围内的抓取超时：直接 `ctx.web.fetch()` 调用方的资源兜底，而非面向模型的工具调用预算（后者属于 `dsh-tool-call-timeout-policy`）。 |
 | `maxRedirects` | `5` | 同源重定向最大跳数（`0` 表示完全不跟随）。 |
 | `userAgent` | `deepseek-harness/…` | `User-Agent` 标头。 |
+| `allowLoopback` | `false` | 只豁免私有网络阻断中的 loopback 一类（loopback 主机名、127.0.0.0/8、::1），供夹具服务器与本地开发使用；其余被阻止的范围在任何取值下都保持强制。 |
 
 数值限制会在插件构造时验证：除 `maxRedirects` 外，每个上限都必须是正的有限数；`maxRedirects` 必须是非负整数。无效值会抛出异常，不会静默构造限制荒谬的提供方。
 
@@ -46,6 +48,7 @@
 
 ## 已知限制与暂缓事项
 
-- **SSRF／私有网络防护暂缓**：不会阻止私有、loopback、link-local、multicast 或其他非公开目标，也不进行 DNS 解析后验证或逐跳重新验证（见 [web 能力 seam Agent Note](../../../.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.md)）。在此功能落地前，该提供方是 SSRF 原语；能够访问敏感内部网络目标的部署**禁止启用它**。
+- **DNS 重绑定 TOCTOU 仍然存在**：防护在连接前解析主机名并校验每个解析地址，但传输层在真正连接时会独立再解析一次，因此敌意 DNS 服务器在检查与连接之间给出不同答案（DNS rebinding）超出本检查器的能力范围。必须约束出站流量的部署还需要网络级控制。
+- **组播、保留与站点本地 IPv6 空间未被阻止**：阻止集合覆盖上文列出的 loopback／私有／link-local 类别；组播（224.0.0.0/4）、保留段以及已弃用的 IPv6 站点本地（`fec0::/10`）不在范围内。
 - **只解码文本内容**：包括 html/xhtml 与 `text/*` 加 JSON/XML 家族；缺少 `Content-Type` 或任何二进制类型都会抛出 `WEB_UNSUPPORTED_CONTENT_TYPE`，可提取文本的 PDF 解码属于明确的暂缓工作。
 - **charset 只来自 `Content-Type` 标头**（默认为 UTF-8）：HTML `<meta charset>` 声明会被忽略；声明但无法识别的 charset 标签会抛出异常，而非回退。

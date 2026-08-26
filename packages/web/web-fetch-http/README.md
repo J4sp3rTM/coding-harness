@@ -17,6 +17,7 @@ A shipping web-tool deployment sets the provider backstop above the tool budget,
 ## Transport hygiene
 
 - Accepts only `http:` and `https:` URLs; rejects credentials in URLs (`WEB_BLOCKED_URL`) and over-long/malformed URLs (`WEB_INVALID_URL`).
+- Blocks private-network targets before connecting (`WEB_BLOCKED_URL`): `localhost`/`*.localhost`/`*.local` names, IPv4 loopback (127.0.0.0/8), this-network (0.0.0.0/8), private 10/8, 172.16/12, 192.168/16, link-local 169.254/16 including cloud metadata `169.254.169.254`, plus the IPv6 loopback/unspecified/unique-local/link-local classes and IPv4-mapped addresses whose embedded IPv4 part is blocked. Hostnames resolve through `node:dns` immediately before each connection — the direct target and every redirect destination alike — and a name resolving to ANY blocked address is refused.
 - Enforces a max URL length, response byte cap (`WEB_FETCH_TOO_LARGE`), decoded body character cap, timeout (`WEB_FETCH_TIMEOUT`), and redirect hop cap.
 - Propagates the caller's abort signal (`WEB_ABORTED`) into the network request and the streaming read.
 - Follows only **same-origin** redirects; a cross-origin redirect fails with `WEB_REDIRECT_BLOCKED`, requiring a fresh tool call (the model of Claude Code's WebFetch).
@@ -33,6 +34,7 @@ A shipping web-tool deployment sets the provider backstop above the tool budget,
 | `timeoutMs` | `30_000` | Fetch timeout within Node's timer range — a resource backstop for direct `ctx.web.fetch()` callers, not the model-facing tool-call budget (that is `dsh-tool-call-timeout-policy`). |
 | `maxRedirects` | `5` | Maximum same-origin redirect hops (`0` follows none). |
 | `userAgent` | `deepseek-harness/…` | `User-Agent` header. |
+| `allowLoopback` | `false` | Waives ONLY the loopback class of the private-network block (loopback hostnames, 127.0.0.0/8, ::1) for fixture servers and local development; every other blocked range stays enforced either way. |
 
 The numeric limits are validated at plugin construction: every cap except `maxRedirects` must be a positive finite number, and `maxRedirects` must be a non-negative integer. An invalid value throws rather than silently constructing a provider with nonsensical limits.
 
@@ -46,6 +48,7 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 
 ## Known Limitations and Deferred Work
 
-- **SSRF / private-network protection is deferred** — no blocking of private, loopback, link-local, multicast, or otherwise non-public destinations, no DNS-resolve-then-validate, no per-hop re-validation (see [the web capability seam Agent Note](../../../.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.md)). Until it lands, this provider is an SSRF primitive and **must not be enabled** in a deployment that can reach sensitive internal network targets.
+- **DNS-rebinding TOCTOU remains** — the guard resolves the hostname and validates every resolved address immediately before connecting, but the transport resolves independently at connect time, so a hostile DNS server answering differently between check and connect is outside this checker's reach. A deployment that must contain outbound traffic needs a network-level control in addition to this guard.
+- **Multicast, reserved, and site-local IPv6 space is not blocked** — the blocked set covers the loopback/private/link-local classes above; multicast (224.0.0.0/4), reserved blocks, and deprecated IPv6 site-local (`fec0::/10`) are out of scope.
 - **Only textual content decodes** — html/xhtml and `text/*`-plus-JSON/XML families; a missing `Content-Type` or any binary type throws `WEB_UNSUPPORTED_CONTENT_TYPE`, and text-extractable PDF decoding is named deferred work.
 - **Charset comes only from the `Content-Type` header** (UTF-8 default) — an HTML `<meta charset>` declaration is ignored, and a declared-but-unrecognized charset label throws rather than falling back.

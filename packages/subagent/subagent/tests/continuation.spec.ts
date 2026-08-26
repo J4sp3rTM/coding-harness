@@ -1831,6 +1831,26 @@ describe('continuable settlement delivery', () => {
       .toEqual(new Set([first.childId, second.childId]))
   })
 
+  it('keeps a settlement notice in next-step while the parent turn is aborting', async () => {
+    const releaseChild = Promise.withResolvers<undefined>()
+    const releaseParent = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('parent works'), gate: releaseParent.promise },
+      { chunks: textResponse('the answer'), gate: releaseChild.promise },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    parent.followup(createUserMessage({ content: message('start working'), source: { kind: 'user' } }))
+    await vi.waitFor(() => { expect(parent.status).toBe('running') })
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    parent.cancel({ kind: 'user' }, { keepInbox: true })
+    releaseChild.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+
+    expect(parent.inbox.nextTurn).toHaveLength(0)
+    expect(parent.inbox.nextStep.some(message => message.source.kind === 'subagent-settled')).toBe(true)
+    releaseParent.resolve(undefined)
+  })
+
   it('holds a maintaining parent live until it can read the notice', async () => {
     const releaseFirst = Promise.withResolvers<undefined>()
     const releaseSecond = Promise.withResolvers<undefined>()
@@ -1871,6 +1891,42 @@ describe('continuable settlement delivery', () => {
     expect(settlementNotices(middle).map(entry => entry.sender))
       .toEqual([first.childId, second.childId])
     await waitNoActivation(ctx, outer.childId)
+  })
+
+  it('accounts an idle continuable parent before waking it with a child report', async () => {
+    const releaseInner = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('outer') },
+      { chunks: textResponse('inner'), gate: releaseInner.promise },
+      { chunks: textResponse('middle reacts') },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    parkParent(ctx, parent)
+    const outer = await ctx.subagents.startContinuable(startSpec(parent))
+    const middle = await vi.waitFor(() => {
+      const live = ctx.agents.get(outer.childId)
+      expect(live).toBeDefined()
+      return live!
+    })
+    const inner = await ctx.subagents.startContinuable(startSpec(middle))
+    const grandchild = await vi.waitFor(() => {
+      const live = ctx.agents.get(inner.childId)
+      expect(live).toBeDefined()
+      return live!
+    })
+    await vi.waitFor(() => { expect(middle.status).toBe('idle') })
+
+    const reportId = await ctx.subagents.reportFrom(grandchild, message('idle parent report'), {
+      delivery: 'wakeup',
+      signal: testSignal,
+    })
+    releaseInner.resolve(undefined)
+    await vi.waitFor(() => {
+      expect(middle.session.events.some(event => event.type === 'user/message'
+        && event.data.id === reportId)).toBe(true)
+    })
+    expect(adapter.requests.filter(request => request.sessionId === middle.id).length).toBeGreaterThanOrEqual(2)
+    await drainManager(ctx)
   })
 
   it('delivers before releasing the ownership that lets the parent settle', async () => {
@@ -2006,7 +2062,7 @@ describe('continuable settlement delivery', () => {
     const { ctx, parent } = await setup([textResponse('the answer')])
     const warnings: string[] = []
     ctx.logger.warn = (text: string) => { warnings.push(text) }
-    vi.spyOn(parent, 'followup').mockImplementation(() => {
+    vi.spyOn(parent, 'steer').mockImplementation(() => {
       throw new Error('parent closed during delivery')
     })
     const ends: SubagentRunEndInfo[] = []
@@ -2151,6 +2207,49 @@ describe('continuable errors', () => {
     await expect(followup(ctx, parent, started.childId, message('hello')))
       .rejects.toThrow(SubagentError)
     expect(ctx.agents.get(started.childId)).toBe(child)
+    hold.resolve(undefined)
+  })
+
+  it('rejects a report from a stale child reference with the same id', async () => {
+    const hold = Promise.withResolvers<undefined>()
+    const { ctx, parent } = await setupWith(new GatedAdapter([
+      { chunks: textResponse('first'), gate: hold.promise },
+    ]))
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    const child = await vi.waitFor(() => {
+      const found = ctx.agents.get(started.childId)
+      expect(found).toBeDefined()
+      return found!
+    })
+    const stale = { ...child, id: child.id } as unknown as Agent
+
+    await expect(ctx.subagents.reportFrom(stale, message('stale report'), {
+      delivery: 'quiet',
+      signal: testSignal,
+    })).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    hold.resolve(undefined)
+  })
+
+  it('rejects a report when its direct parent is no longer live', async () => {
+    const hold = Promise.withResolvers<undefined>()
+    const { ctx, parent } = await setupWith(new GatedAdapter([
+      { chunks: textResponse('first'), gate: hold.promise },
+    ]))
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    const child = await vi.waitFor(() => {
+      const found = ctx.agents.get(started.childId)
+      expect(found).toBeDefined()
+      return found!
+    })
+    const get = vi.spyOn(ctx.agents, 'get').mockImplementation(id => id === parent.id
+      ? undefined
+      : (ctx.agents.list().find(agent => agent.id === id)))
+
+    await expect(ctx.subagents.reportFrom(child, message('orphan report'), {
+      delivery: 'quiet',
+      signal: testSignal,
+    })).rejects.toMatchObject({ code: 'PARENT_UNAVAILABLE' })
+    get.mockRestore()
     hold.resolve(undefined)
   })
 

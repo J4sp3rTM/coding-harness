@@ -6,7 +6,7 @@ The optional child-scoped `report` tool is a thin adapter over `ctx.subagents.re
 
 The child-scoped `tool:report` prompt section instructs the child to call `report` once before finishing, with a self-contained answer, and earlier whenever a partial finding changes what the parent should do next. The instruction is guidance, not enforcement: the mechanism still accepts zero or many calls in one turn, and no runtime path rejects a child that never reports. A successful call neither concludes the turn, settles the Activation, nor prevents later parent follow-ups, and finishing a turn never reports automatically. The tool accepts no recipient: `exec.agent` is the sender's exact live Agent and the authority credential, and the service derives the sole recipient from that child's durable `parentSession`. Success returns the stable `MessageId` of the parent-accepted message, not a read receipt, an inbox-occurrence id, a parent-log acknowledgement, a turn-completion receipt, or a persistence flush. A parent absent from the registry fails the call with `direct parent is not live; report was not delivered` — registry presence governs parent resolution, and a registered parent already in host-owned disposal still accepts while its log admits appends. The service performs no injection, parent cold resume, or offline mailbox write; the durable child transcript remains the recovery source, and a failed tool call does not prove non-delivery (a later `tools/post-execute` veto can fail a call whose report was already accepted).
 
-`reportDelivery` selects parent scheduling for every accepted report. `wakeup` (the default) uses `parent.followup()`, creating exactly one ordinary later parent turn and waking a parked parent driver; it never steers an open turn. It is the default because a parent that already parked has no other reason to look, so quiet delivery would leave an accepted report unread until something unrelated woke it. `quiet` uses `parent.inject()`, adding model-facing context without starting a parent model request: an idle parent's append completes before the call returns, while a report reaching an admitting or running parent stages for the next safe log position. This is deployment scheduling policy, so the model-facing schema cannot select or override it per call.
+`reportDelivery` selects parent scheduling for every accepted report. `wakeup` (the default) steers next-step context when the parent is idle, so a parked parent actually starts a turn, and injects when the parent is already running — including after Stop, because a waking send would be reclassified onto the later-turn queue. It is the default because a parent that already parked has no other reason to look. A report is not a next-turn user prompt, so it never enters the later-turn queue. `quiet` always uses `parent.inject()`, adding model-facing context without starting a parent model request. This is deployment scheduling policy, so the model-facing schema cannot select or override it per call.
 
 Scope-local registration deliberately survives the child's global `toolFilter`, so a delegation allow-list cannot remove the only return channel. A deployment that requires a child with no return channel omits this package.
 
@@ -36,7 +36,7 @@ Prefix-stable within a child; neither the schema nor the section changes at runt
 
 #### Token effect
 
-One short acknowledgement per call in the reporting child. The reported content is additionally billed to the parent: waking delivery makes it the sole ordinary message of one new parent turn, while quiet delivery adds it to the parent's next request.
+One short acknowledgement per call in the reporting child. The reported content is additionally billed to the parent: waking delivery adds it to the parent's next request and starts that request when the parent is idle, while quiet delivery adds it without starting one.
 
 #### KV Cache effect
 
@@ -54,7 +54,7 @@ The child's complete `output` plus the one-line frame, uncapped by this package.
 
 #### KV Cache effect
 
-Append-only; the report follows the parent's reusable request prefix. Waking delivery starts an independent parent model request, while quiet delivery does not.
+Append-only; the report follows the parent's reusable request prefix. Waking delivery starts a parent model request when the parent is idle, while quiet delivery never does.
 
 ## Known Limitations and Deferred Work
 

@@ -4,13 +4,14 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH } from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionResult, ToolExecutionToken } from '@deepseek-ai/dsh-tools'
+import { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { WorkflowRunId, WorkflowEngine } from '@deepseek-ai/dsh-workflow'
 import type {
   WorkflowAgentEndInfo, WorkflowAgentInfo, WorkflowResult, WorkflowRun,
   WorkflowRunId as WorkflowRunIdType, WorkflowStartRequest,
 } from '@deepseek-ai/dsh-workflow'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import WorkerThreadWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as toolWorkflow from '../src/index.ts'
@@ -23,6 +24,8 @@ class StubEngine extends WorkflowEngine {
   requests: WorkflowStartRequest[] = []
   cancels: string[] = []
   disposed = 0
+  steers: string[] = []
+  acceptSteers = true
   disposeBarrier: Promise<void> | undefined
   settle!: (result: WorkflowResult) => void
   readonly settlements = new Map<WorkflowRunIdType, (result: WorkflowResult) => void>()
@@ -45,6 +48,7 @@ class StubEngine extends WorkflowEngine {
         this.cancels.push(reason ?? 'cancelled')
         this.settle({ value: null, stopReason: 'cancelled', ...reason !== undefined ? { error: reason } : {}, agentsStarted: 0 })
       },
+      steer: (text: string) => { if (this.acceptSteers) this.steers.push(text); return this.acceptSteers },
       dispose: async () => {
         this.disposed += 1
         await this.disposeBarrier
@@ -180,7 +184,13 @@ describe('dsh-tool-workflow', () => {
     await vi.waitFor(() => { expect(engine.requests).toHaveLength(2) })
     const secondId = WorkflowRunId('run-2')
     engine.agentStart(secondId, {
-      seq: 1, label: 'member', childId: SessionId('child-2'),
+      seq: 1,
+      label: 'member',
+      childId: SessionId('child-2'),
+      provider: 'mock',
+      model: 'mock-model',
+      effort: 'medium',
+      effortSource: 'configured',
     })
     engine.agentEnd(secondId, {
       seq: 1, label: 'member', childId: SessionId('child-2'), outcome: 'failed',
@@ -442,6 +452,106 @@ describe('dsh-tool-workflow', () => {
       const result = await pending
       expect(result.isError).toBe(true)
       expect((result.content[0] as { text: string }).text).toContain('cancelled')
+    })
+  })
+
+  describe('mid-run steering', () => {
+    it('forwards user-origin inbox insertions to the running run and stops forwarding at settlement', async () => {
+      const { ctx, engine, parent } = await setup()
+      const pending = execute(ctx, { script: SCRIPT, meta: META }, { agent: parent })
+      await vi.waitFor(() => { expect(engine.requests).toHaveLength(1) })
+      agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+        message: createUserMessage({ content: [{ type: 'text', text: 'prefer the smaller diff' }], source: { kind: 'user' } }),
+      })
+      // Plugin-sourced context is not an operator instruction.
+      agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+        message: createUserMessage({ content: [{ type: 'text', text: 'AGENTS.md reconciled' }], source: { kind: 'plugin', plugin: 'agent-instructions' } }),
+      })
+      // A message with no text block carries nothing a script could apply.
+      agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+        message: createUserMessage({ content: [], source: { kind: 'user' } }),
+      })
+      expect(engine.steers).toEqual(['prefer the smaller diff'])
+      engine.settle({ value: 1, stopReason: 'completed', agentsStarted: 0 })
+      await pending
+      // The listener leaves with the call: later input belongs to the parent's
+      // own next step, not to a finished run.
+      agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+        message: createUserMessage({ content: [{ type: 'text', text: 'after the run' }], source: { kind: 'user' } }),
+      })
+      expect(engine.steers).toEqual(['prefer the smaller diff'])
+    })
+
+    it('records each forwarded message in the run\'s durable record', async () => {
+      const { ctx, engine, parent, session } = await setup()
+      const pending = execute(ctx, { script: SCRIPT, meta: META }, { agent: parent })
+      await vi.waitFor(() => { expect(engine.requests).toHaveLength(1) })
+      agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+        message: createUserMessage({ content: [{ type: 'text', text: 'prefer the smaller diff' }], source: { kind: 'user' } }),
+      })
+      agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+        message: createUserMessage({ content: [{ type: 'text', text: 'and skip the rename' }], source: { kind: 'user' } }),
+      })
+      engine.settle({ value: 1, stopReason: 'completed', agentsStarted: 0 })
+      await pending
+      expect(session.events.filter(event => event.type === 'tool-workflow/steering').map(event => event.data))
+        .toEqual([{ runId: 'run-1' }, { runId: 'run-1' }])
+    })
+
+    it('does not record a forward rejected by the run', async () => {
+      const { ctx, engine, parent, session } = await setup()
+      engine.acceptSteers = false
+      const pending = execute(ctx, { script: SCRIPT, meta: META }, { agent: parent })
+      await vi.waitFor(() => { expect(engine.requests).toHaveLength(1) })
+      agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+        message: createUserMessage({ content: [{ type: 'text', text: 'too late' }], source: { kind: 'user' } }),
+      })
+      expect(engine.steers).toEqual([])
+      engine.settle({ value: 1, stopReason: 'completed', agentsStarted: 0 })
+      await pending
+      expect(session.events.some(event => event.type === 'tool-workflow/steering')).toBe(false)
+    })
+
+    it('stops recording a run whose steering append fails, and ignores steering for an unrecorded run', async () => {
+      const { ctx, engine, parent, session } = await setup()
+      const warnings: string[] = []
+      ctx.logger.warn = ((message: unknown) => { warnings.push(String(message)) }) as typeof ctx.logger.warn
+      const append = session.append.bind(session)
+      session.append = ((type: Parameters<Session['append']>[0], data: never) => {
+        if (type === 'tool-workflow/steering') throw new Error('injected steering failure')
+        return append(type, data)
+      }) as Session['append']
+
+      const pending = execute(ctx, { script: SCRIPT, meta: META }, { agent: parent })
+      await vi.waitFor(() => { expect(engine.requests).toHaveLength(1) })
+      const steer = (): void => {
+        agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+          message: createUserMessage({ content: [{ type: 'text', text: 'guidance' }], source: { kind: 'user' } }),
+        })
+      }
+      // The failed append disables this run's record; the run itself continues.
+      steer()
+      // A second forward now finds no active record and appends nothing more.
+      steer()
+      engine.settle({ value: 1, stopReason: 'completed', agentsStarted: 0 })
+      expect((await pending).isError).toBe(false)
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain('tool-workflow/steering')
+      expect(session.events.map(event => event.type)).toEqual(['tool-workflow/run-start'])
+    })
+
+    it('ignores insertions belonging to another agent', async () => {
+      const { ctx, engine, parent } = await setup()
+      const otherSession = Session.create(SessionId('other'))
+      const other = { id: otherSession.id, options: {}, session: otherSession } as unknown as Agent
+      const pending = execute(ctx, { script: SCRIPT, meta: META }, { agent: parent })
+      await vi.waitFor(() => { expect(engine.requests).toHaveLength(1) })
+      agentEvents(ctx, other).emit('agent/inbox/inserted', {
+        message: createUserMessage({ content: [{ type: 'text', text: 'someone else typed this' }], source: { kind: 'user' } }),
+      })
+      expect(engine.steers).toEqual([])
+      engine.settle({ value: 1, stopReason: 'completed', agentsStarted: 0 })
+      await pending
     })
   })
 })

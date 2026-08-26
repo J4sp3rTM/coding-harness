@@ -19,7 +19,7 @@ Exa 和 Perplexity 提供专用搜索端点，DeepSeek 则没有。该提供方�
 | 配置键 | 默认值 | 含义 |
 |---|---|---|
 | `apiKey` | 未设置 | DeepSeek API 密钥字面值。优先使用 `apiKeyEnv`，避免密钥进入配置；非空字面值优先。 |
-| `apiKeyEnv` | `DEEPSEEK_API_KEY` | 每次搜索都会通过 `ctx.credentials` 解析该凭据引用；没有该 seam 时则从进程环境解析。值缺失时，调用以 `WEB_PROVIDER_CREDENTIAL_MISSING` 失败。 |
+| `apiKeyEnv` | `DEEPSEEK_API_KEY` | 每次搜索都会通过 `ctx.credentials` 解析该凭据引用；没有该 seam 时则从进程环境解析。值缺失时，web seam 中的提供方以 `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` 标记为不可用；直接调用提供方则以 `WEB_PROVIDER_CREDENTIAL_MISSING` 失败。 |
 | `baseURL` | `https://api.deepseek.com/anthropic/v1` | Anthropic 兼容端点基址；追加 `/messages`。缺省时回退到任一环境层中的 `$DEEPSEEK_SEARCH_BASE_URL`；禁止复用属于 chat-completions LLM 适配器的 `$DEEPSEEK_BASE_URL`。无法解析时提供方不可用。 |
 | `model` | `deepseek-v4-flash` | Anthropic 格式模型名称。 |
 | `apiVersion` | `2023-06-01` | `anthropic-version` 标头值。 |
@@ -81,6 +81,6 @@ DeepSeek 返回的提供方生成答案均不被该提供方信任为 `content`�
 ## 已知限制与暂缓事项
 
 - **一次搜索需要完整的 Messages 模型轮次**：会产生延迟与生成 token，并且最多执行 `maxUses` 次服务器侧搜索；DeepSeek 不公开专用检索端点。
-- **动态凭据的可用性在操作内部解析**：同步的 `available()` 约定可以确认解析器存在，但无法查询异步凭据存储。因此，选中的无密钥提供方会使搜索以 `WEB_PROVIDER_CREDENTIAL_MISSING` 失败；稳定的 `web_search` schema 仍保持注册。调用方取消在本地与该预检存在竞态，但无法强制任意凭据后端自行停止工作。
+- **凭据可用性使用异步快照**：插件在注册前读取凭据 seam，并在已提交的设置或凭据更新后刷新快照。每次刷新都会在权威的 `describe()` 结果结算前默认不可用，因此有序 web 偏好会在密钥更新进行时到达回退提供方；序列检查会阻止过时的 set 结果在 unset 之后重新开放该提供方。
 - **超量返回的源仍消耗 token**：协议没有结果数量旋钮，`maxResults` 只能由 seam 在事后截断。
 - **未引用的结果没有 `snippet`**：只有 `text` 块中的引用（`cited_text`）匹配其 URL 时，源才会获得 snippet。

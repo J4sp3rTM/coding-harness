@@ -11,6 +11,8 @@ This package owns the Service Definition role of the web capability. Unlike shel
 | `@deepseek-ai/dsh-web` (this) | Service Definition: the service, provider registries, selection policy, request/result vocabulary, the `WebError` taxonomy |
 | `@deepseek-ai/dsh-web-search-exa` | Search provider: Exa |
 | `@deepseek-ai/dsh-web-search-perplexity` | Search provider: Perplexity |
+| `@deepseek-ai/dsh-web-search-deepseek` | Search provider: DeepSeek native |
+| `@deepseek-ai/dsh-web-search-duckduckgo` | Search provider: keyless DuckDuckGo HTML |
 | `@deepseek-ai/dsh-web-fetch-http` | Fetch provider: anonymous public HTTP(S) |
 | `@deepseek-ai/dsh-tool-web` | Consumer: the model-facing `web_search` / `web_fetch` tool schemas over `ctx.web` |
 
@@ -28,16 +30,19 @@ Providers register **capabilities**, not tools. `dsh-tool-web` is the only owner
 
 ## Selection
 
-Selection never depends on registration, config, or HMR order. A capability has an explicit provider id (config `searchProvider`/`fetchProvider`, or env `$DSH_WEB_SEARCH_PROVIDER`/`$DSH_WEB_FETCH_PROVIDER` feeding the same fields), or auto-selects when exactly one usable provider is registered. `search()`/`fetch()` resolve the provider at execution time:
+A pin (`searchProvider`/`fetchProvider`, or `$DSH_WEB_SEARCH_PROVIDER`/`$DSH_WEB_FETCH_PROVIDER` feeding the same fields) wins outright. An ordered list (`searchProviders`/`fetchProviders`) applies only when no pin is set. Auto-selection applies only when neither is configured. `search()`/`fetch()` resolve the provider at execution time:
 
 | Situation | Execution |
 |---|---|
-| configured id registered and `available()` | runs that provider |
-| configured id not registered | `WEB_PROVIDER_CONFIGURED_MISSING` |
-| configured id registered but unavailable | `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` |
-| no id, exactly one registered usable provider | runs it |
-| no id, no usable provider | `WEB_PROVIDER_UNAVAILABLE` |
-| no id, multiple usable providers | `WEB_PROVIDER_AMBIGUOUS` |
+| pinned id registered and `available()` | runs that provider |
+| pinned id not registered | `WEB_PROVIDER_CONFIGURED_MISSING` |
+| pinned id registered but unavailable | `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` (a pin never falls back) |
+| no pin, listed id never registered | `WEB_PROVIDER_CONFIGURED_MISSING` |
+| no pin, listed id registered but unavailable | skipped; first usable listed id wins |
+| no pin, every listed id unavailable | `WEB_PROVIDER_UNAVAILABLE` |
+| neither pin nor list, exactly one registered usable provider | runs it |
+| neither pin nor list, no usable provider | `WEB_PROVIDER_UNAVAILABLE` |
+| neither pin nor list, multiple usable providers | `WEB_PROVIDER_AMBIGUOUS` |
 
 The failure branches throw `WebError`, whose structured code (plus message detail — the missing id, the ambiguous candidate set) is the direct callers route on. A provider's own `available()` is a cheap local check (credential presence, parseable config) that feeds this execution-time selection and **must not make network calls**; `dsh-tool-web` never calls it — the tool executes through `ctx.web.search()`/`fetch()` and routes on the thrown codes, so provider selection has one owner.
 

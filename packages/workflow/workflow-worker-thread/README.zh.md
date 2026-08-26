@@ -30,7 +30,8 @@ worker 仍提供实用的隔离：
 - `agent(prompt, { label, phase, schema, provider, model, effort })` 启动一个宿主侧 subagent。provider、model 和该模型专属的推理等级是彼此独立的路由覆盖。提供 schema 时返回结构化值，否则返回最终文本。普通子 agent 失败会产生 `null`；
 - `parallel(thunks)` 在已配置的并发限制下运行 thunk；
 - `pipeline(items, ...stages)` 在没有跨阶段屏障的情况下传递 `(previous, item, index)`；
-- `phase(title)` 和 `log(message)` 发出观察器叙述。
+- `phase(title)` 和 `log(message)` 发出观察器叙述；
+- `steering()` 取走自上次调用以来转发进来的 operator（操作者）消息，按到达顺序返回。它立即 resolve，没有消息时返回空数组，因此脚本应在各阶段之间轮询它，而不是等待它。
 
 未知选项、格式错误的参数、不支持的 schema、超出上限、提供方启动失败和基础设施结果失败都属于致命工作流错误。有意不注入 timer、文件系统 API 或 Node 全局变量，但上述信任注意事项仍然适用。
 
@@ -72,6 +73,12 @@ worker 错误、消息失败或提前退出会在清理前关闭消息接纳，�
 
 宿主会维护已转发子 agent 启动的台账。优雅退出的 worker 会提供对应的结束事件；死亡或强制终止会把缺失的结束事件合成为已取消。因此，每个已转发的 `workflow/agent-start` 都会且只会配对一次，不过已经到达的工作流结果之后的清理可能稍后才完成。
 
+## 轮次中途 steering
+
+`WorkflowRun.steer(text)` 向运行中的脚本投递一条 operator 消息，并返回运行是否接受该消息；worker 会把已接受的消息追加到每次运行独有的 mailbox（信箱），由 `steering()` 取走。已取消、已结算或 worker 已消失的运行会丢弃该消息，worker 侧已取消的执行同样丢弃：转发方 Consumer（消费方）会把该消息保留在父级 inbox（收件箱）中，因此 operator 写下的内容不依赖这次投递。
+
+mailbox 最多保留 `maxSteeringMessages` 条未取走的消息。达到上限时丢弃最旧的一条，并通过 `log` 叙述该丢弃，因此从不取走消息的脚本不会让内存无界增长，transcript（文本记录）里也仍然留有这次丢失的记录。
+
 ## 配置
 
 | 键 | 默认值 | 含义 |
@@ -81,6 +88,7 @@ worker 错误、消息失败或提前退出会在清理前关闭消息接纳，�
 | `maxTotalAgents` | `1000` | 一次运行中的 `agent()` 调用总数。 |
 | `maxItemsPerCall` | `4096` | 一次 `parallel()` 或 `pipeline()` 调用接受的条目数。 |
 | `syncTimeoutMs` | `5000` | 脚本最初同步片段的 VM 超时时间。 |
+| `maxSteeringMessages` | `16` | 单次运行的 steering mailbox 保留的未取走 operator 消息数量。 |
 | `disposeGraceMs` | `5000` | 强制结算/终止之前的期限，也是公开 dispose 的期限。 |
 
 负责该引擎的消费方可以为一次运行设置 `WorkflowStartRequest.subagentProvider` 和 `WorkflowStartRequest.maxTotalAgents`。它们属于引擎级策略，不是脚本钩子或面向模型的选项；普通 `workflow` 工具不会设置两者。每次运行的子 agent 总数上限可以降低、但绝不能提高已配置的 `maxTotalAgents` 上限。

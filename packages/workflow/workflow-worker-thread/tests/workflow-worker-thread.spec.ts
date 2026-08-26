@@ -660,6 +660,49 @@ describe('dsh-workflow-worker-thread', () => {
     })
   })
 
+  it('resolves the automatic concurrency ceiling when configured as zero', async () => {
+    const { ctx, parent } = await setup({ config: { maxConcurrentAgents: 0 } })
+    const result = await run(ctx, parent, scripted('return 1'))
+    expect(result).toMatchObject({ value: 1, stopReason: 'completed' })
+  })
+
+  describe('mid-run steering', () => {
+    it('steer() reaches the running script across the thread and drains in arrival order', async () => {
+      const { ctx, parent, provider } = await setup({ manual: true })
+      const handle = ctx.workflowEngine.start({
+        ...scripted(`
+          await agent('first unit')
+          return await steering()
+        `),
+        parent,
+      })
+      await waitFor(() => { expect(provider.runs.length).toBe(1) })
+      expect(handle.steer('prefer the smaller diff')).toBe(true)
+      expect(handle.steer('skip the rename')).toBe(true)
+      provider.runs[0]!.settle(text('done'))
+      const result = await handle.result
+      expect(result.stopReason).toBe('completed')
+      expect(result.value).toEqual(['prefer the smaller diff', 'skip the rename'])
+      await handle.dispose()
+    })
+
+    it('steering a settled or cancelled run is dropped, not an error', async () => {
+      const { ctx, parent, provider } = await setup({ manual: true })
+      const settledRun = ctx.workflowEngine.start({ ...scripted('return 1'), parent })
+      const settled = await settledRun.result
+      expect(settled.value).toBe(1)
+      expect(settledRun.steer('too late')).toBe(false)
+      await settledRun.dispose()
+
+      const cancelledRun = ctx.workflowEngine.start({ ...scripted("return await agent('never')"), parent })
+      await waitFor(() => { expect(provider.runs.length).toBe(1) })
+      cancelledRun.cancel('user stopped it')
+      expect(cancelledRun.steer('too late')).toBe(false)
+      expect((await cancelledRun.result).stopReason).toBe('cancelled')
+      await cancelledRun.dispose()
+    })
+  })
+
   describe('lifecycle: parse errors, cancellation, termination, disposal', () => {
     it('start() throws synchronously for invalid meta data or an unparseable body (host-side pre-checks)', async () => {
       const { ctx, parent } = await setup()

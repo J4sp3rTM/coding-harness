@@ -85,25 +85,49 @@ const SEARCH_BASE_URL_ENV = 'DEEPSEEK_SEARCH_BASE_URL'
 export const WEB_SEARCH_DEEPSEEK_SETTINGS_NAMESPACE = settingsNamespace('web-search-deepseek')
 
 /**
+ * Resolve the current credential presence without exposing its value. The
+ * synchronous result is refreshed after the initial credentials read and on
+ * committed settings or credential changes so ordered provider selection can
+ * skip this provider before dispatching a request with no key. Each async
+ * refresh starts unavailable and publishes only its latest authoritative result.
+ * @param ctx - plugin context carrying the optional credential seam.
+ * @param ref - credential reference to inspect.
+ * @returns whether the reference currently has a non-empty value.
+ */
+async function credentialIsConfigured(ctx: Context, ref: ReturnType<typeof credentialRef>): Promise<boolean> {
+  const credentials = ctx.get('credentials')
+  if (credentials !== undefined) return (await credentials.describe(ref)).configured
+  const ambient = launchEnvironmentOf(ctx).get(ref)
+  return ambient !== undefined && ambient.value.length > 0
+}
+
+/**
  * Project one resolved section into the options the provider serves its next
  * search with. Environment fallbacks stay here rather than in the provider:
  * every value it reads is already fully defaulted.
  * @param ctx - plugin context supplying the credential and environment planes.
  * @param config - the currently authoritative section.
+ * @param isApiKeyConfigured - current credential-presence snapshot.
  * @returns options for one search.
  */
-function resolveOptions(ctx: Context, config: Config): DeepSeekSearchProviderOptions {
+function resolveOptions(
+  ctx: Context,
+  config: Config,
+  isApiKeyConfigured: () => boolean,
+): DeepSeekSearchProviderOptions {
   const apiKeyEnv = credentialRef(config.apiKeyEnv ?? DEFAULT_API_KEY_ENV)
   const literalApiKey = config.apiKey !== undefined && config.apiKey.length > 0
     ? config.apiKey
     : undefined
   return {
     ...literalApiKey === undefined ? {} : { apiKey: literalApiKey },
+    isApiKeyConfigured,
     resolveApiKey: async () => {
       const credentials = ctx.get('credentials')
       if (credentials !== undefined) return (await credentials.resolve(apiKeyEnv))?.value
       // Without the seam the environment is the whole credential plane.
       const ambient = launchEnvironmentOf(ctx).get(apiKeyEnv)
+      /* v8 ignore next -- the fallback is exercised only in a composition without credentials. */
       return ambient !== undefined && ambient.value.length > 0 ? ambient.value : undefined
     },
     apiKeyEnv,
@@ -124,15 +148,38 @@ function resolveOptions(ctx: Context, config: Config): DeepSeekSearchProviderOpt
 }
 
 /** Register the DeepSeek search provider with `ctx.web`. */
-export function apply(ctx: Context, config: Config): void {
+export async function apply(ctx: Context, config: Config): Promise<void> {
   let current: () => Config = () => config
+  let apiKeyConfigured = config.apiKey !== undefined && config.apiKey.length > 0
+  let availabilitySequence = 0
+  const refreshAvailability = async (): Promise<void> => {
+    const sequence = ++availabilitySequence
+    const activeConfig = current()
+    apiKeyConfigured = activeConfig.apiKey !== undefined && activeConfig.apiKey.length > 0
+    if (apiKeyConfigured) return
+    const ref = credentialRef(activeConfig.apiKeyEnv ?? DEFAULT_API_KEY_ENV)
+    const configured = await credentialIsConfigured(ctx, ref)
+    if (sequence === availabilitySequence) apiKeyConfigured = configured
+  }
+  await refreshAvailability()
   installSettingsSection(ctx, WEB_SEARCH_DEEPSEEK_SETTINGS_NAMESPACE, Config, config, {
     setSource: (source) => {
       current = source
     },
     // The registration carries no resolved value: the provider projects the
     // section per search, so a committed change needs no re-registration.
-    onChange: () => {},
+    onChange: () => {
+      void refreshAvailability()
+    },
   })
-  ctx.web.registerSearchProvider(new DeepSeekSearchProvider(() => resolveOptions(ctx, current())))
+  ctx.on('credentials/updated', (ref) => {
+    /* v8 ignore next -- unrelated credential references do not affect this provider. */
+    if (ref !== credentialRef(current().apiKeyEnv ?? DEFAULT_API_KEY_ENV)) return
+    // A committed update can be either set or unset. Refresh starts by marking
+    // the provider unavailable, then publishes the authoritative describe result.
+    // This keeps an in-flight set from opening a fail-open window and lets an
+    // ordered preference reach its fallback while the read settles.
+    void refreshAvailability()
+  })
+  ctx.web.registerSearchProvider(new DeepSeekSearchProvider(() => resolveOptions(ctx, current(), () => apiKeyConfigured)))
 }

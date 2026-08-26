@@ -1,5 +1,7 @@
 # Conduit
 
+English | [中文](README.zh.md)
+
 Conduit is an open-source agent harness for coding agents. It is a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`).
 
 Everything in Conduit is a plugin. The plugin system is [Cordis](https://github.com/cordiverse/cordis).

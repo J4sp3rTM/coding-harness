@@ -23,6 +23,10 @@ flowchart LR
   pkg_goal_round_driver["goal-round-driver"]
   pkg_token_meter["token-meter"]
   svc_tokenMeter["ctx.tokenMeter<br/>Replay token measurement"]
+  pkg_provider_status["provider-status"]
+  svc_providerStatus["ctx.providerStatus<br/>Last-observed provider quota store"]
+  pkg_command_usage["command-usage"]
+  svc_deepseekAccount["ctx.deepseekAccount<br/>DeepSeek prepaid-balance lookup"]
   pkg_compaction_tool_result_pruner["compaction-tool-result-pruner"]
   svc_toolResultPruner["ctx.toolResultPruner<br/>Model-free tool-result pruning"]
   pkg_session["session"]
@@ -173,6 +177,7 @@ flowchart LR
   pkg_web_search_exa["web-search-exa"]
   pkg_web_search_perplexity["web-search-perplexity"]
   pkg_web_search_deepseek["web-search-deepseek"]
+  pkg_web_search_duckduckgo["web-search-duckduckgo"]
   pkg_web_fetch_http["web-fetch-http"]
   pkg_spill["spill"]
   svc_spillStore["ctx.spillStore<br/>Spill storage seam"]
@@ -235,6 +240,7 @@ flowchart LR
   pkg_jobs --> svc_jobs
   pkg_jobs_local --> svc_jobs
   pkg_llm --> svc_llm
+  pkg_llm_deepseek --> svc_deepseekAccount
   pkg_llm_deepseek --> svc_llm
   pkg_llm_oauth --> svc_llmOAuth
   pkg_llm_oauth_local --> svc_llmOAuth
@@ -247,6 +253,7 @@ flowchart LR
   pkg_modules --> svc_clientModules
   pkg_permission_presets --> svc_permissionPresets
   pkg_plan_mode --> svc_planMode
+  pkg_provider_status --> svc_providerStatus
   pkg_pwsh_local --> svc_shell
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
@@ -298,6 +305,7 @@ flowchart LR
   pkg_web --> svc_web
   pkg_web_fetch_http --> svc_web
   pkg_web_search_deepseek --> svc_web
+  pkg_web_search_duckduckgo --> svc_web
   pkg_web_search_exa --> svc_web
   pkg_web_search_perplexity --> svc_web
   pkg_webserver --> svc_webServer
@@ -322,6 +330,7 @@ flowchart LR
   svc_credentials --> pkg_apiproxy
   svc_credentials --> pkg_llm_deepseek
   svc_credentials --> pkg_llm_pi_ai
+  svc_deepseekAccount --> pkg_command_usage
   svc_directoryPicker --> pkg_apiproxy
   svc_dynamicCordisRunner --> pkg_tool_cordis
   svc_e2b --> pkg_fs_e2b
@@ -341,6 +350,8 @@ flowchart LR
   svc_llmOAuth --> pkg_llm_pi_ai
   svc_llmRetry --> pkg_goal_round_driver
   svc_lsp --> pkg_tool_lsp
+  svc_providerStatus --> pkg_command_usage
+  svc_providerStatus --> pkg_llm_pi_ai
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -428,6 +439,8 @@ flowchart LR
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | Adapters register provider implementations; the loop and compaction call the provider-neutral stream service. |
 | `ctx.llmRetry` | `core` | [`llm-retry`](../packages/llm/llm-retry) | - | [`goal-round-driver`](../packages/goal/goal-round-driver) | - | Provider-declared policies and registered contributions decide eligibility only; this service alone owns backoff, retry-chain numbering, durable retry events, and teardown drain. |
 | `ctx.tokenMeter` | `core` | [`token-meter`](../packages/llm/token-meter) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | Owns isolated per-session replay folds; pressure consumers share immutable revisioned measurements. |
+| `ctx.providerStatus` | `core` | [`provider-status`](../packages/llm/provider-status) | - | [`command-usage`](../packages/llm/command-usage), [`llm-pi-ai`](../packages/llm/llm-pi-ai) | - | Adapters publish parsed rate-limit headers; /usage looks the latest record up by the receiving agent route. |
+| `ctx.deepseekAccount` | `core` | [`llm-deepseek`](../packages/llm/llm-deepseek) | - | [`command-usage`](../packages/llm/command-usage) | - | Optional live GET {base}/user/balance for the official DeepSeek route, read through ctx.get. |
 | `ctx.toolResultPruner` | `core` | [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | Rewrites oversized current tool results through replayable single-node surface replacements before summary compaction. |
 | `ctx.sessions` | `core` | [`session`](../packages/core/session) | - | [`agent-loop`](../packages/core/agent-loop), [`agent`](../packages/core/agent), [`session-persistence`](../packages/session/session-persistence), [`session-query`](../packages/session-query/session-query), [`session-query-sqlite`](../packages/session-query/session-query-sqlite), `subagent-inprocess`, [`invariants`](../packages/runtime-diagnostics/invariants), [`message-feedback`](../packages/feedback/message-feedback) | - | Owns append-only Session instances and emits the durable session event feed. |
 | `ctx.invariants` | `core` | [`invariants`](../packages/runtime-diagnostics/invariants) | - | [`session`](../packages/core/session), [`agent`](../packages/core/agent), [`scope`](../packages/core/scope), [`agent-loop`](../packages/core/agent-loop) | - | Companion subpaths register owner-local checks; the service owns selection, uniqueness, child fibers, and package-attributed failures. |
@@ -472,7 +485,7 @@ flowchart LR
 | `ctx.compaction` | `seam` | [`compaction`](../packages/compaction/compaction) | [`compaction-basic`](../packages/compaction/compaction-basic) | [`compaction-basic`](../packages/compaction/compaction-basic) | - | The basic backend consumes post-step pressure and request-error recovery events; there is no model-facing compact tool. |
 | `ctx.subagents` | `seam` | [`subagent`](../packages/subagent/subagent) | [`subagent-spawn-in-process`](../packages/subagent/subagent-spawn-in-process), [`subagent-fork-in-process`](../packages/subagent/subagent-fork-in-process), [`subagent-acp`](../packages/subagent/subagent-acp), [`subagent-codex`](../packages/subagent/subagent-codex), [`subagent-claude-code`](../packages/subagent/subagent-claude-code), [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-subagent-control`](../packages/subagent/tool-subagent-control), [`tool-ralph`](../packages/workflow/tool-ralph) | - | Providers implement transports; the service also owns optional Activation-based continuation orchestration, tool-subagent selects one-shot or continuable delegation, tool-subagent-control delivers follow-ups, and tool-ralph requires one fresh structured-output route. |
 | `ctx.jobs` | `seam` | [`jobs`](../packages/jobs/jobs) | [`jobs-local`](../packages/jobs/jobs-local) | [`tool-bash`](../packages/shell/tool-bash), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-jobs`](../packages/jobs/tool-jobs) | - | Producers (background bash, PTY sends, and subagent delegations) register running work; tool-jobs is the model-facing controller that reads, lists, and kills it; jobs-local is the process-local registry. |
-| `ctx.web` | `seam` | [`web`](../packages/web/web) | [`web-search-exa`](../packages/web/web-search-exa), [`web-search-perplexity`](../packages/web/web-search-perplexity), [`web-search-deepseek`](../packages/web/web-search-deepseek), [`web-fetch-http`](../packages/web/web-fetch-http) | [`tool-web`](../packages/web/tool-web) | - | Search and fetch providers register into one ctx.web seam; tool-web owns the stable model-facing names. |
+| `ctx.web` | `seam` | [`web`](../packages/web/web) | [`web-search-exa`](../packages/web/web-search-exa), [`web-search-perplexity`](../packages/web/web-search-perplexity), [`web-search-deepseek`](../packages/web/web-search-deepseek), [`web-search-duckduckgo`](../packages/web/web-search-duckduckgo), [`web-fetch-http`](../packages/web/web-fetch-http) | [`tool-web`](../packages/web/tool-web) | - | Search and fetch providers register into one ctx.web seam; tool-web owns the stable model-facing names. |
 | `ctx.spillStore` | `seam` | [`spill`](../packages/spill/spill) | [`spill-local`](../packages/spill/spill-local) | [`spill-policy`](../packages/spill/spill-policy) | - | The backend saves oversized tool text and returns a model-facing locator plus retrieval hint; spill-policy is the tools/post-execute consumer that decides when to spill. |
 | `ctx.directoryPicker` | `seam` | `directory-picker` | `directory-picker-native`, `directory-picker-browse` | `apiproxy` | - | Discriminated interaction capability: the native backend opens one OS chooser on the host display, the browse backend serves listing/creation primitives for the in-app browser; dual-face backends fill ui-workspace directory-flow slots from their browser halves (no wire advertisement). |
 | `ctx.webServer` | `core` | `webserver` | - | `connection`, `modules`, `hmr` | - | Plain node:http carrier: named-route registry, index transform taps, and the static dist fallback; web-transport plugins register their own routes. |

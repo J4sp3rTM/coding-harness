@@ -81,4 +81,36 @@ describe('dsh-base bundle', () => {
     // The platform layer folded into these rows: no separate patch file ships.
     expect(existsSync(resolve(root, 'windows.cordis.patch.yml'))).toBe(false)
   })
+
+  it('ships ordered keyless-fallback search and an enabled guarded web_fetch', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url))
+    const manifest = JSON.parse(
+      readFileSync(resolve(root, 'package.json'), 'utf8'),
+    ) as { dependencies?: Record<string, string> }
+    const parsed = yaml.load(
+      readFileSync(resolve(root, 'cordis.patch.yml'), 'utf8'),
+      { schema: entryListSchema },
+    )
+    if (!Array.isArray(parsed)) throw new TypeError('base patch must parse to a patch list')
+    const rows = parsed.flatMap((patch): Record<string, unknown>[] =>
+      typeof patch === 'object' && patch !== null
+        ? (patch as { insert?: Record<string, unknown>[] }).insert ?? []
+        : [],
+    )
+    // Ordered preference, not a pinned id: the DeepSeek route first, then the
+    // keyless fallback a deployment without a key can still reach.
+    const webRow = rows.find(candidate => candidate.id === 'web')
+    expect(webRow?.config).toEqual({ searchProviders: ['deepseek-official', 'duckduckgo'] })
+    for (const id of ['provider-status', 'web-search-deepseek', 'web-search-duckduckgo', 'web-fetch-http']) {
+      expect(rows.some(candidate => candidate.id === id), `${id} row`).toBe(true)
+    }
+    // fetch defaults to true in tool-web; the row states only what it pins.
+    const toolWebRow = rows.find(candidate => candidate.id === 'tool-web')
+    expect(toolWebRow?.config).toEqual({ searchTimeoutMs: 60000 })
+    // Every mounted bare plugin is declared: the patch rows resolve through
+    // real workspace dependencies.
+    for (const name of ['@deepseek-ai/dsh-provider-status', '@deepseek-ai/dsh-web-fetch-http', '@deepseek-ai/dsh-web-search-deepseek', '@deepseek-ai/dsh-web-search-duckduckgo']) {
+      expect(manifest.dependencies).toHaveProperty(name)
+    }
+  })
 })

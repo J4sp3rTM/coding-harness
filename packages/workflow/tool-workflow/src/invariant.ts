@@ -126,6 +126,11 @@ function applyEvent(trace: WorkflowTrace, event: SessionEvent, fail: InvariantFa
       run.members.set(seq, true)
       return
     }
+    case 'tool-workflow/steering': {
+      // Mid-run input belongs to a run that is still holding the parent's turn.
+      openRun(trace, runId, event.type, fail)
+      return
+    }
     case 'tool-workflow/run-end': {
       const run = openRun(trace, runId, event.type, fail)
       if (data.stopReason !== 'completed' && data.stopReason !== 'cancelled' && data.stopReason !== 'error') {

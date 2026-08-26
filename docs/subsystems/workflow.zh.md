@@ -92,7 +92,7 @@ interface WorkflowResult {
 
 ## 活跃运行：`WorkflowRun`
 
-脚本执行期间消费方持有的句柄。消费方会等待 `result`，可以在运行期间调用 `cancel`，并且必须在每条路径上调用 `dispose`（资源释放）。`result` 不会被拒绝：脚本失败会兑现为 `stopReason: 'error'`。运行被取消后，即使脚本本身永不结算，结果也会在引擎规定的有界宽限期内结算；引擎会强制将其结算为 `cancelled`，随后 worker-thread 引擎会终止脚本所在的 worker。因此，等待 `result` 的消费方不会在取消后无限期挂起。`dispose()` 会执行取消、等待有界结算并等待子 agent 完全停稳，不会因脚本卡死而挂起。
+脚本执行期间消费方持有的句柄。消费方会等待 `result`，可以在运行期间调用 `cancel`，并且必须在每条路径上调用 `dispose`（资源释放）。`result` 不会被拒绝：脚本失败会兑现为 `stopReason: 'error'`。运行被取消后，即使脚本本身永不结算，结果也会在引擎规定的有界宽限期内结算；引擎会强制将其结算为 `cancelled`，随后 worker-thread 引擎会终止脚本所在的 worker。因此，等待 `result` 的消费方不会在取消后无限期挂起。`dispose()` 会执行取消、等待有界结算并等待子 agent 完全停稳，不会因脚本卡死而挂起。`steer(text)` 把一条 operator（操作者）消息转发进运行中的脚本——由脚本决定是否消费、何时消费；不再接受工作的运行会丢弃该消息，而这不会损失任何持久内容，因为转发方 Consumer（消费方）会把该消息保留在父级 inbox（收件箱）中。
 
 ```ts type-equiv
 /**
@@ -106,6 +106,16 @@ interface WorkflowRun {
   readonly result: Promise<WorkflowResult>
   /** Cancel the run and its children. */
   cancel(reason?: string): void
+  /**
+   * Forward one operator message into the running script, which decides
+   * whether and when to consume it. Delivery is best effort by contract: a
+   * run that already stopped accepting work drops the message, and the
+   * forwarding consumer leaves the original message in the parent's inbox, so
+   * the parent still reads it at its own next step boundary.
+   * @param text - the forwarded message's model-facing text.
+   * @returns whether the run accepted the message for worker delivery.
+   */
+  steer(text: string): boolean
   /** Cancel if needed and await bounded settlement and cleanup. */
   dispose(): Promise<void>
 }

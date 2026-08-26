@@ -43,6 +43,40 @@ describe('durable workflow-record invariants', () => {
     })).not.toThrow()
   })
 
+  it('rejects malformed route facts on agent-start', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create(SessionId('workflow-record-route'))
+    const runId = WorkflowRunId('route')
+    session.append('tool-workflow/run-start', { runId, name: 'route' })
+    const member = { runId, seq: 1, label: 'worker', childId: SessionId('child') }
+    expect(() => session.append('tool-workflow/agent-start', { ...member, provider: '' }))
+      .toThrow(expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }))
+    expect(() => session.append('tool-workflow/agent-start', {
+      ...member,
+      effortSource: 'guessed' as unknown as 'configured',
+    })).toThrow(expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }))
+  })
+
+  it('accepts steering only while its run is open', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create(SessionId('workflow-record-steering'))
+    const runId = WorkflowRunId('steered')
+    session.append('tool-workflow/run-start', { runId, name: 'steered' })
+    expect(() => session.append('tool-workflow/steering', { runId })).not.toThrow()
+    session.append('tool-workflow/run-end', { runId, stopReason: 'completed' })
+    const before = session.seq
+    expect(() => session.append('tool-workflow/steering', { runId })).toThrow(
+      expect.objectContaining<Partial<InvariantError>>({
+        code: 'INVARIANT',
+        packageName: '@deepseek-ai/dsh-tool-workflow',
+      }),
+    )
+    expect(() => session.append('tool-workflow/steering', { runId: WorkflowRunId('never-started') })).toThrow(
+      expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }),
+    )
+    expect(session.seq).toBe(before)
+  })
+
   it('rejects a malformed candidate before commit and keeps the fold reusable', async () => {
     const ctx = await setup()
     const session = ctx.sessions.create(SessionId('workflow-record-invalid'))

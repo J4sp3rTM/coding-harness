@@ -19,7 +19,7 @@ subagent seam 允许一个 agent（智能体）通过具名提供方把工作委
 | `startContinuable(spec)` | 建立一个持久化的可继续子 agent，并投递其初始提示词。子 agent 的 inbox 一接受该提示词，调用就会兑现为 `{ childId, messageId }`，无需等待轮次开始，也无需等待消息写入会话日志。在此之前发生的任何失败都会使调用被拒绝，不返回任何 id，并完全回滚该子 agent。要求 `ctx.agents`、会话持久化以及具备 `prepareContinuable` 能力的提供方。 |
 | `followup(parent, childId, content, { source, signal })` | 将来自确切在线直接父级的一条后续消息作为子 agent 的下一个 FIFO 轮次投递，术语与 `Agent.followup()` 一致，并返回被接受的 `MessageId`。驻留中的子 agent 由其 inbox 直接接受（唤醒处于 waiting 的 Activation）；不驻留的则从其持久化会话冷恢复。要求 `ctx.agents`；冷恢复还要求会话持久化。 |
 | `interrupt(targetSessionId, authority)` | 凭人类出示的持久化父级地址 `{ kind: 'user', parentSessionId }`，或确切在线的祖先 Agent `{ kind: 'ancestor', agent }` 进行授权，中断一个在线可继续子级的当前轮次。准入判定同步完成，但取消异步生效：该操作发出 `Agent.cancel(cause, { keepInbox: true })` 后立即返回，不等待目标观察到信号。尚未领取的待处理 inbox 工作、Activation 和已发布的后代均会保留；已经领取到被中断轮次中的工作不会重新入队。目标不存在时视为已接受的空操作；错误的父级地址，或陈旧、指向自身、并非祖先的调用方，会以 `UNAUTHORIZED` 被拒绝。 |
-| `reportFrom(child, content, { delivery, signal })` | 从确切在线可继续 child 向其确切在线直接 parent 投递一条选中消息，并返回已接受的稳定 `MessageId`。静默投递会注入上下文；唤醒投递会提交一个后续 parent 轮次。 |
+| `reportFrom(child, content, { delivery, signal })` | 从确切在线可继续 child 向其确切在线直接 parent 投递一条选中消息，并返回已接受的稳定 `MessageId`。静默投递会注入上下文；唤醒投递会把 next-step 上下文 steer 给父级，并唤醒停驻的父级。 |
 | `registerContinuableSetup(contribution)` | 把一项可选部署能力组合到每个可继续 child 尚未发布的作用域中，并支持从驻留 child 立即撤销。 |
 | `drainContinuableDescendants(parents)` | 在由 host 拥有的确切在线父级 Agent 之下关闭准入，只停止这些父级可见的可继续后代；等待已在这些根节点下获准的物化过程完成发布或回滚后，再按子级优先顺序释放所选的各棵树。该截止状态会持续到每个确切父级离开注册表；无关的父级树仍在线，管理器全局准入仍保持开放。 |
 | `listChildren(parentSessionId, signal?)` | 按 `createdAt`、再按 id 的顺序列出由会话支撑的直接 subagent，包括其 `one-shot`／`continuable` 模式、`running`／`inactive` 活动状态、根据 origin 分类得出的一层 `hasChildren` 提示，以及每个子级的诊断信息，且不会加载或恢复它们。该操作直接读取在线会话存储和可选的会话持久化（没有持久化时只枚举在线子级），并要求已挂载 `sessionProjections` 注册表；不要求 `ctx.agents`、继续执行管理器或任何查询服务。 |
@@ -72,7 +72,7 @@ subagent seam 允许一个 agent（智能体）通过具名提供方把工作委
 
 每个可继续子 agent 都有一个持久化 Session，并且同一时刻至多有一个进程内 **Activation**。Activation 表示重建后的子 agent 的一次驻留时段，不是请求、结果、取消或 Task 的边界。Agent inbox 是唯一的轮次队列，因此驻留归继续执行管理器，所有轮次排序与执行归 agent loop（智能体循环）。任何可继续路径都不会创建 Task 或中间的承载结果的包装层。
 
-管理器根据 Agent 的完全停稳状态和所拥有的子级集合推导三种内部驻留状态，而不维护第二套状态机：running 表示存在正在进行的准入、尚未结束的轮次，或会唤醒 Agent 的 inbox 工作；waiting 表示 Agent 已完全停稳，但仍拥有至少一个尚未 dispose 的子级；settled 表示 Agent 已完全停稳且所有拥有的子级均已 dispose，此时管理器会 dispose `AgentHandle` 并移除 Activation。每条后续消息都使用 `Agent.followup()` 并成为一个 FIFO 轮次，且不会对当前轮次进行 steering（中途引导）。路由只取决于驻留状态：running 入队、waiting 唤醒同一 Agent，无 Activation 时则冷恢复一个新的。
+管理器根据 Agent 的完全停稳状态和所拥有的子级集合推导三种内部驻留状态，而不维护第二套状态机：running 表示存在正在进行的准入、尚未结束的轮次，或会唤醒 Agent 的 inbox 工作；waiting 表示 Agent 已完全停稳，但仍拥有至少一个尚未 dispose 的子级；settled 表示 Agent 已完全停稳且所有拥有的子级均已 dispose，此时管理器会 dispose `AgentHandle` 并移除 Activation。父到子的继续消息使用 `Agent.followup()` 并成为一个 FIFO 轮次，且不会对当前轮次进行 steering（中途引导）。子到父的 report 与结算通知使用 next-step 上下文：`steer()` 会唤醒空闲父级，而 `inject()` 会向已在运行或正在拆卸的父级添加上下文。路由只取决于驻留状态：running 入队、waiting 唤醒同一 Agent，无 Activation 时则冷恢复一个新的。
 
 管理器预留子 agent 身份、解析持久化描述符，通过私有的 activation-owner 作用域调用 `ctx.agents.create()`（冷恢复时为 `ctx.agents.resume()`），把返回的 `AgentHandle` 安装到 Activation 中，建立任何可继续父级所有权，然后提交提示词。冷恢复绝不通过提供方分发，因为持久化会话已持有初始前缀，折叠后的描述符即是全部重建输入。
 
@@ -80,9 +80,9 @@ subagent seam 允许一个 agent（智能体）通过具名提供方把工作委
 
 当一个驻留 Activation 结算时，管理器会在父级自身的轮次流中告知该子级持久化的直接父级：这个子级已经产出它将产出的全部内容。对于每个已经向调用方返回过 id 的子级，管理器都会无条件投递结算通知，不考虑该子级是否调用过 `report`。最需要说明结局的终止情形，包括达到 token 上限、模型失败、取消或拆卸，恰恰是子级根本没有机会选择的那些情形。在第一条消息被接受之前就回滚的物化保持静默，因为那位调用方已被告知该子级未建立。消息会携带该 epoch 的终止原因、它产出过的最终 assistant 内容，以及持久化来源 `{ kind: 'subagent-settled', form: 'notice', senderSessionId: <child-id> }`——与子级自撰的 `subagent-report` 是不同的来源 kind，因此 transcript（文本记录）绝不会把运行时写下的话算到子级头上。
 
-有两条顺序规则让这条投递可靠而非侥幸，它们也正是这件事属于管理器而非外部 `subagent/end` listener 的原因。第一，发送发生在子级所有权释放**之前**，此时父级仍然计入该子级，因此在结构上不可能被判定为已结算。第二，如果父级本身也是驻留 Activation，该消息会采用与 report 相同的唤醒准入记账。这样，从同步发送消息到负责准入该消息的 microtask 运行之间的窗口，不会被误判为完全停稳——`Agent.status` 会把上下文维护折叠成 `idle`，而维护期间的唤醒发送只会预置一次延后唤醒。缺少其中任一条规则，父级都可能在通知仍留在 inbox 时被 dispose，而 `cancel()` 会清空该 inbox，于是通知被静默丢失。
+有两条顺序规则让这条投递可靠而非侥幸，它们也正是这件事属于管理器而非外部 `subagent/end` listener 的原因。第一，发送发生在子级所有权释放**之前**，此时父级仍然计入该子级，因此在结构上不可能被判定为已结算。第二，如果父级本身是空闲的驻留 Activation，该消息会采用与 report 相同的唤醒准入记账。这样，从同步发送消息到负责准入该消息的 microtask 运行之间的窗口，不会被误判为完全停稳——`Agent.status` 会把上下文维护折叠成 `idle`，而维护期间的唤醒发送只会预置一次延后唤醒。缺少其中任一条规则，父级都可能在通知仍留在 inbox 时被 dispose，而 `cancel()` 会清空该 inbox，于是通知被静默丢失。
 
-空闲父级会以一个普通的后续轮次收到该通知。繁忙父级则被 steer 到其最近的 step 边界，因此同时结算的多个子级只消耗一个 step，而不是各自一个轮次；采用 steer 而非 inject 还意味着：即便驱动在状态读取与发送之间退出，该消息仍会被认领。如果父级所在的谱系已经开始排空，该通知会通过 inject 投递，且完全不会唤醒父级。对已经完全停稳的父级调用 `Agent.followup()` 会开启新轮次，而 `cancel()` 不会预先阻止之后开启的轮次；因此在拆卸期间唤醒父级，会让宿主即将 dispose 的 Agent 多执行一次模型请求，而且树的每一层各一次，因为每层自己的通知又会唤醒上一层。被 inject 的消息会送达仍在读取自身 inbox 的父级，而无论如何日志都会记录这份记账；但它不会比该父级自身的 dispose 活得更久：`AgentHandle.dispose()` 是一次 `keepInbox: false` 的 cancel，会持久地取消尚未被认领的通知。因此 resume 后的父级没有待处理通知可读：`list_agents` 只告诉它有哪些子级、各自是在线还是仅存于存储；结局本身留在子级自己的 Session 里，一次 `send_message` 会通过 resume 该子级把它取回。已离开注册表的父级不算错误：通知被丢弃，子级自身的 Session 仍是持久记录。投递绝不会阻塞或使拆卸失败——发送被拒只会记录日志，因为为了重试一条通知而保留子级，会把它的整条祖先链永久钉在 `waiting` 上。
+该通知是 next-step 上下文，不是 next-turn 提示词。`Agent.steer()` 会把空闲父级唤醒进一个轮次，并把同时结算的多个子级并入繁忙父级的同一个 step；inject 会让停驻的父级一直读不到通知，直到别的事件把它唤醒。如果父级所在的谱系已经开始排空，该通知会通过 inject 投递，且完全不会唤醒父级。对已经完全停稳的父级调用 `Agent.steer()` 会开启新轮次，而 `cancel()` 不会预先阻止之后开启的轮次；因此在拆卸期间唤醒父级，会让宿主即将 dispose 的 Agent 多执行一次模型请求，而且树的每一层各一次，因为每层自己的通知又会唤醒上一层。被 inject 的消息会送达仍在读取自身 inbox 的父级，而无论如何日志都会记录这份记账；但它不会比该父级自身的 dispose 活得更久：`AgentHandle.dispose()` 是一次 `keepInbox: false` 的 cancel，会持久地取消尚未被认领的通知。因此 resume 后的父级没有待处理通知可读：`list_agents` 只告诉它有哪些子级、各自是在线还是仅存于存储；结局本身留在子级自己的 Session 里，一次 `send_message` 会通过 resume 该子级把它取回。已离开注册表的父级不算错误：通知被丢弃，子级自身的 Session 仍是持久记录。投递绝不会阻塞或使拆卸失败——发送被拒只会记录日志，因为为了重试一条通知而保留子级，会把它的整条祖先链永久钉在 `waiting` 上。
 
 受继续执行管理的父级 Activation 会在子 agent 能够运行之前，把每个子 agent 的会话 id 记录到 `ownedChildren` 集合中，并且只有在每个所拥有的子 agent Activation 完成 `AgentHandle` dispose 之后才会 dispose（子先于父）。拆卸会先自顶向下传播 Agent 取消，再等待缓慢的后代，而 handle 释放仍保持 child-first。顶层及其他非继续执行的 Agent 没有 Activation，处于该等待图之外。最终结算会在 dispose handle 前等待 best-effort 的 `ctx.sessions.flush(child.session)`。监听器拒绝会被记录，但不会使 Activation 失败，因为监听器参与本身不能标识持久化后端；因此恢复时的持久化状态仍可能缺失或陈旧。
 
@@ -146,7 +146,7 @@ You are a delegated subagent: your permission scope was fixed when you were star
 
 - **ACP 子 agent 仍为一次性，且无法通过追踪枚举**：ACP 运行在 parent 会话语料中没有本地 child 会话。ACP 的 `prepareContinuable` 需要在提供方专用描述符数据中持久化远端会话 id，以及逐子 agent 的继续执行能力声明，因为 ACP 的 `loadSession` 支持按子 agent 协商，而不是通过方法是否存在来确定。远程提供方还需要一份独立的 Activation 所有权约定，具备等效的经认证控制和子先于父的完全停稳保证，才能支持可继续子 agent。
 - **无 host-user 继续执行**：`followup()` 要求确切在线直接父级。只有 `interrupt()` 接受持久化 parent 地址形式的用户授权，因为停止一个轮次是幂等的且不投递任何内容；未来 host 适配器需要具体的经认证交互，才能让该 seam 获得用户投递能力。
-- **不对当前轮次进行 steering**：可继续消息和唤醒式 report 会排入后续轮次，均不会重定向正在进行的轮次。
+- **不对子级当前轮次进行 steering**：父到子的 `followup()` 会排入子级的后续轮次，不会重定向已经在进行的工作。子到父的 report 与结算通知在父级上使用 next-step 上下文。
 - **取消收敛期间存在唤醒缺口**：中断信号发出后、活动 driver 进入 idle 前被接受的唤醒型 follow-up 会保持排队，直到另一条唤醒发送到达。Issue #1838 负责 agent-loop 的唤醒锁存；普通会话取消也受此影响。
 - **驻留仅限进程内**：Activation inbox 与所有权图不会在两个 harness 进程之间协调；对单个持久化存储的并发访问仍然需要持久化邮箱和跨进程租约协议。
 - **不回放已接受但未记录的消息**：只有写入子 agent 会话日志的消息才能连同提供该消息的来源一起重建。崩溃可能丢失从未写入日志、已被接受的初始提示词或后续消息；此后一条经授权的消息可以冷恢复该子 agent，但丢失的消息不会自动回放。

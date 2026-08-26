@@ -2,11 +2,13 @@
 
 English | [中文](README.zh.md)
 
-The browser plugin that reconstructs durable top-level workflow runs as independent Chat nodes. It consumes the four `tool-workflow/*` Session events owned by [`dsh-tool-workflow`](../../workflow/tool-workflow/README.md), registers one `ConversationNodeDefinition`, and renders through the keyed `conversation.chat.node` slot without changing the existing workflow tool card.
+The browser plugin that reconstructs durable top-level workflow runs as independent Chat nodes. It consumes the five `tool-workflow/*` Session events owned by [`dsh-tool-workflow`](../../workflow/tool-workflow/README.md), registers one `ConversationNodeDefinition`, and renders through the keyed `conversation.chat.node` slot without changing the existing workflow tool card.
 
 ## Durable state and replay
 
 `tool-workflow/run-start` creates one Context keyed by `runId`; member starts, member endings, and the run ending update that Context in log order. A history tail containing only updates remains pending until an older page supplies the unique start, after which prepend, complete replay, and live append produce the same state. A closed Turn or Step with missing terminal events presents the affected run or members as interrupted without changing the tool result.
+
+Each `tool-workflow/steering` record increments one count on the run: while a foreground run holds the parent's turn, the parent cannot claim the user's message, so the run states that it received it. The count renders as one tertiary line above the phase list and is absent at zero. It counts messages the run received, not messages a worker acted on — a message that arrived after every unit started reaches no worker, and the tool result is what distinguishes the two.
 
 Phase groups come only from members that actually started. Exact phase strings share a group, an omitted phase is distinct from the empty string, and settlement changes status without removing or reordering members.
 

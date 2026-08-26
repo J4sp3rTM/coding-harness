@@ -112,6 +112,21 @@
       "source": "packages/llm/llm/src/call-config.ts"
     },
     {
+      "doc": "docs/subsystems/llm-streaming.md",
+      "symbol": "ProviderQuotaDimensionSnapshot",
+      "source": "packages/llm/provider-status/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/llm-streaming.md",
+      "symbol": "ProviderStatusPublication",
+      "source": "packages/llm/provider-status/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/llm-streaming.md",
+      "symbol": "ProviderStatusRecord",
+      "source": "packages/llm/provider-status/src/types.ts"
+    },
+    {
       "doc": "docs/subsystems/core.md",
       "symbol": "InboxTarget",
       "source": "packages/core/agent/src/types.ts"

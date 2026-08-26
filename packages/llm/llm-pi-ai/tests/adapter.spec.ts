@@ -43,10 +43,12 @@ async function harness(baseURL: string, overrides: Record<string, unknown> = {})
 function adapterOf(
   providers: Record<string, LlmPiAi.PiAiProviderProfile>,
   apiKey: string | undefined = 'test-key',
+  hooks: Pick<LlmPiAi.PiAiAdapterOptions, 'onProviderResponse'> = {},
 ): PiAiAdapter {
   return new PiAiAdapter({
     profiles: () => resolveProfiles(providers),
     resolveAuth: () => Promise.resolve({ subscription: false, ...apiKey === undefined ? {} : { apiKey } }),
+    ...hooks,
   })
 }
 
@@ -899,5 +901,118 @@ describe('abort wiring', () => {
     }
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(server.requests).toHaveLength(1)
+  })
+})
+
+describe('provider response observation', () => {
+  const rateLimitHeaders = {
+    'x-ratelimit-limit-requests': '60',
+    'x-ratelimit-remaining-requests': '59',
+    'x-ratelimit-limit-tokens': '100000',
+    'x-ratelimit-remaining-tokens': '99940',
+  }
+
+  async function drain(adapter: PiAiAdapter): Promise<void> {
+    for await (const chunk of adapter.stream({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      messages: [],
+      signal: new AbortController().signal,
+    })) {
+      if (chunk.type === 'finish') expect(chunk.reason).toMatchObject({ kind: 'stop' })
+    }
+  }
+
+  it('reports one completed response with route, auth posture, and headers', async () => {
+    const server = await mockServer([{ events: textEvents, headers: rateLimitHeaders }])
+    const observed: LlmPiAi.PiAiProviderResponseObservation[] = []
+    const adapter = adapterOf(
+      { deepseek: { apiKeyEnv: 'PI_TEST_KEY', baseURL: server.url } },
+      undefined,
+      { onProviderResponse: observation => observed.push(observation) },
+    )
+    await drain(adapter)
+    expect(observed).toHaveLength(1)
+    expect(observed[0]).toMatchObject({
+      provider: 'deepseek',
+      subscription: false,
+      credentialIdentity: 'PI_TEST_KEY',
+      status: 200,
+    })
+    expect(observed[0]?.headers['x-ratelimit-limit-requests']).toBe('60')
+  })
+
+  it('contains a throwing observer so the model request still completes', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const adapter = adapterOf(
+      { deepseek: { baseURL: server.url } },
+      'test-key',
+      { onProviderResponse: () => { throw new Error('recorder exploded') } },
+    )
+    // The stream finishing with `stop` proves the observer failure stayed contained.
+    await drain(adapter)
+  })
+
+  it('publishes parsed dimensions into an optional provider-status service', async () => {
+    const server = await mockServer([{ events: textEvents, headers: rateLimitHeaders }])
+    const ctx = await harness(server.url)
+    type Publication = { routeId: string; kind?: string; reason?: string; dimensions?: unknown[]; windows?: unknown[] }
+    const published: Publication[] = []
+    ctx.reflect.provide('providerStatus', {
+      recordSnapshot: (input: Publication) => published.push(input),
+      recordUnavailable: (input: Publication) => published.push(input),
+      lookup: () => undefined,
+    })
+    await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
+    expect(published).toEqual([{
+      routeId: 'deepseek',
+      credentialIdentity: 'PI_TEST_KEY',
+      windows: [],
+      dimensions: [
+        { dimension: 'requests', limit: 60, remaining: 59 },
+        { dimension: 'tokens', limit: 100_000, remaining: 99_940 },
+      ],
+    }])
+  })
+
+  it('records an unavailable state when recognized headers carry no usable values', async () => {
+    const server = await mockServer([{
+      events: textEvents,
+      headers: { 'x-ratelimit-limit-requests': 'bogus', 'x-ratelimit-remaining-requests': '-1' },
+    }])
+    const ctx = await harness(server.url)
+    type Publication = { routeId: string; kind?: string; reason?: string }
+    const published: Publication[] = []
+    ctx.reflect.provide('providerStatus', {
+      recordSnapshot: (input: Publication) => published.push(input),
+      recordUnavailable: (input: Publication) => published.push(input),
+      lookup: () => undefined,
+    })
+    await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
+    expect(published).toEqual([{
+      routeId: 'deepseek',
+      credentialIdentity: 'PI_TEST_KEY',
+      reason: 'rate-limit headers were present but carried no parseable values',
+    }])
+  })
+
+  it('publishes nothing when a response carries no recognizable rate-limit header', async () => {
+    const server = await mockServer([{ events: textEvents, headers: { 'x-request-id': 'abc' } }])
+    const ctx = await harness(server.url)
+    const published: unknown[] = []
+    ctx.reflect.provide('providerStatus', {
+      recordSnapshot: (input: unknown) => published.push(input),
+      recordUnavailable: (input: unknown) => published.push(input),
+      lookup: () => undefined,
+    })
+    await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
+    expect(published).toEqual([])
+  })
+
+  it('keeps requests unchanged when no provider-status service is composed', async () => {
+    const server = await mockServer([{ events: textEvents, headers: rateLimitHeaders }])
+    const ctx = await harness(server.url)
+    const result = await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
+    expect(result.finish).toEqual({ kind: 'stop' })
   })
 })

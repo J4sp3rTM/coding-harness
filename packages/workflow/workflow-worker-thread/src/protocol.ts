@@ -56,6 +56,8 @@ export enum HostToWorkerType {
   Go = 'go',
   /** Cancel the run: hooks start throwing and the script dies at its next await. */
   Cancel = 'cancel',
+  /** Operator steering forwarded mid-run: appended to the mailbox the script drains through `steering()`. */
+  Steer = 'steer',
   /** Child RPC reply: the provider fulfilled with a published run (exactly one start reply per ChildStart). */
   ChildStarted = 'child-started',
   /** Child RPC reply: the provider's asynchronous start failed. */
@@ -74,6 +76,8 @@ export interface HostToWorkerPayloads {
   [HostToWorkerType.Go]: Record<never, never>
   /** The cancel reason, canonical for the whole run. */
   [HostToWorkerType.Cancel]: { reason: string }
+  /** One forwarded operator message, as model-facing text. */
+  [HostToWorkerType.Steer]: { text: string }
   /** The RPC correlation id and the child agent's id (minted by the subagent seam). */
   [HostToWorkerType.ChildStarted]: { callId: number; childId: string }
   /** The RPC correlation id and the rendered start failure. */

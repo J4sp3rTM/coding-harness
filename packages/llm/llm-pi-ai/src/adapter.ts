@@ -93,6 +93,29 @@ export interface PiAiRequestAuth {
   subscription: boolean
 }
 
+/**
+ * One completed provider HTTP response, as reported by pi-ai after the
+ * response arrives and before its body stream is consumed; a request failing
+ * at the HTTP status level throws before this point, so observers see the
+ * success path only. Header data stays inside the observer's package;
+ * publishing it anywhere happens only through a normalizing step.
+ */
+export interface PiAiProviderResponseObservation {
+  /** Harness provider route that served the request. */
+  provider: string
+  /** Whether the request authenticated with a stored subscription token. */
+  subscription: boolean
+  /**
+   * Credential reference naming the route's key when its profile names one —
+   * a non-secret label for diagnostics, never the key itself.
+   */
+  credentialIdentity?: string
+  /** HTTP status of the completed response. */
+  status: number
+  /** Response headers exactly as pi-ai reported them. */
+  headers: Readonly<Record<string, string>>
+}
+
 /** Constructor options for {@link PiAiAdapter}: the resolution hooks the plugin owns. */
 export interface PiAiAdapterOptions {
   /** Current validated profiles by provider route; called once per operation. */
@@ -119,6 +142,13 @@ export interface PiAiAdapterOptions {
    * conversion because its stored replay state is unusable by this build.
    */
   onReplayDegrade?: (detail: { provider: string; model: string; reason: string }) => void
+  /**
+   * Best-effort observer for one completed provider HTTP response, threaded
+   * through pi-ai's `onResponse` stream option for quota bookkeeping. The
+   * observer owns any normalization; the adapter contains a throwing observer,
+   * so status recording can never fail the model request it rode on.
+   */
+  onProviderResponse?: (observation: PiAiProviderResponseObservation) => void
 }
 
 /** Copy profile stream knobs into pi-ai's common option vocabulary. */
@@ -455,6 +485,20 @@ export class PiAiAdapter extends LlmAdapter {
         // Harness-owned and therefore win collisions, except where a provider's
         // OAuth endpoint requires its own client identity.
         headers: requestHeaders(profile.headers, options.provider, auth.subscription),
+        onResponse: (response) => {
+          try {
+            this.config.onProviderResponse?.({
+              provider: options.provider,
+              subscription: auth.subscription,
+              ...profile.apiKeyEnv === undefined ? {} : { credentialIdentity: profile.apiKeyEnv },
+              status: response.status,
+              headers: response.headers,
+            })
+          } catch (_observerFailure) {
+            // Status recording is best-effort observability; an observer
+            // failure must never surface as a model-request failure.
+          }
+        },
       })
       const iterator = toStreamChunks(events, model.contextWindow, options.signal)[Symbol.asyncIterator]()
       let exhausted = false

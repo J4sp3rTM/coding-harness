@@ -14,7 +14,17 @@
 
 对于根 transport 执行（`exec.parent` 缺省），工具还会把运行投影到调用 Agent 的 Session：`start()` 返回后写 run-start，只记录 `run.id` 匹配的成员开始与结束，并且只在 `run.result` 已取得且 `dispose()` 完全停稳后写 run-end。嵌套 transport 调用照常执行，但不写工作流记录。任一次 Session append 首次失败后，本运行会停止后续记录并只告警一次，留下空记录或合法连续前缀，同时不改变工具结果和清理。
 
-浏览器安全的 `@deepseek-ai/dsh-tool-workflow/types` 子路径拥有这四类 log-only 事件 payload 及其 `SessionEventMap` 声明。包 invariant 会在冷加载和实时追加时拒绝重复 start、未配对成员、仍有开放成员的终点和 run-end 后更新，同时允许缺失终态后缀的连续前缀。
+浏览器安全的 `@deepseek-ai/dsh-tool-workflow/types` 子路径拥有这五类 log-only 事件 payload 及其 `SessionEventMap` 声明。包 invariant 会在冷加载和实时追加时拒绝重复 start、未配对成员、仍有开放成员的终点和 run-end 后更新，同时允许缺失终态后缀的连续前缀。
+
+## 轮次中途 steering
+
+前台运行会占满父级两个 step（步骤）边界之间的整段时间，因此用户在脚本运行期间发送的消息，在本次调用返回之前无法被父级领取。在运行存续期间，本工具把进入父级 inbox（收件箱）的每条用户来源插入转发给 `run.steer(text)`，脚本通过 `steering()` 读取。转发只转发、不消费，也从不改写历史：消息仍留在父级 inbox 中，并在父级平常的下一个 step 边界抵达父级模型。每次接受的转发还会写入一条只含运行 id 的 `tool-workflow/steering` 回执；它只记录运行接受了消息，不表示 Worker 已据此行动，也不重复消息内容。因此无论脚本是否取走过副本，持久 transcript（文本记录）都完全相同。[steering 回执 Agent Note](../../../.agents/notes/implemented/feature/2026-08-26-workflow-run-steering-record.md)记录了该元数据的 UI 投影。
+
+只有 `source.kind === 'user'` 的插入会被转发。插件与工具来源的插入（注入的上下文、subagent 结算报告）不是 operator（操作者）指令。文本块会被拼接并去除首尾空白；不含文本块的消息会被跳过。监听器随调用一同结束，因此结算之后到达的输入只属于父级。
+
+`@deepseek-ai/dsh-tool-workflow/steering` 子路径向其他面向模型的工作流消费方公开该转发器。
+
+每次被接受的转发都会追加一条 `tool-workflow/steering` 记录，只携带接收方运行的 id，因此读者可以看到某次运行接收了轮次中途输入，而不重复消息本身——消息文本仍留在它自己的 `user/message` 中。只有拥有开启中持久记录的运行才会产生它：嵌套的传输调用根本不写工作流记录，而已因 append 失败被停用的记录保持停用。该记录服务于运行面板，用来说明这次运行收到了用户的多少条消息；模型则从工具结果读取同一事实。
 
 `@deepseek-ai/dsh-tool-workflow/recorder` 子路径向其他面向模型的工作流消费方公开共享的持久记录器，并保持相同的 `tool-workflow/*` 事件约定。成员 start 会从工作流事件复制可选的 provider、model、已配置推理等级，以及 `effortSource`（`configured` 或 `provider-default`）。这些字段不含凭据。
 

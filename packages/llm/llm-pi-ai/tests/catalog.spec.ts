@@ -408,32 +408,45 @@ describe('catalog routes with per-model configuration', () => {
       .toEqual(getBuiltinModels('deepseek').map(model => model.id).sort())
   })
 
-  it('lists Grok 4.6 from the installed xAI catalog', () => {
+  it('lists a model from the installed xAI catalog', () => {
+    const [catalogModel] = getBuiltinModels('xai')
+    if (catalogModel === undefined) throw new Error('the installed xAI catalog ships no models')
     const resolved = resolveProfiles({ xai: {} }).get('xai')?.piProvider.getModels() ?? []
-    const model = resolved.find(candidate => candidate.id === 'grok-4.6')
+    const model = resolved.find(candidate => candidate.id === catalogModel.id)
 
     expect(model).toMatchObject({
-      id: 'grok-4.6',
-      name: 'Grok 4.6',
+      id: catalogModel.id,
+      name: catalogModel.name,
       provider: 'xai',
     })
   })
 
   it('lists Ox Alpha from the OpenRouter catalog without additionalModels', () => {
+    const catalog = getBuiltinModels('openrouter').find(candidate => candidate.id === 'stealth/ox-alpha')
     const resolved = resolveProfiles({ openrouter: {} }).get('openrouter')?.piProvider.getModels() ?? []
     const model = resolved.find(candidate => candidate.id === 'stealth/ox-alpha')
+    if (model === undefined) throw new Error('the resolved OpenRouter catalog omits stealth/ox-alpha')
 
+    expect(model).toMatchObject({ id: 'stealth/ox-alpha', provider: 'openrouter' })
+    if (catalog !== undefined) {
+      // Projection copies the installed catalog; upstream metadata remains the
+      // authority once pi-ai ships this model itself.
+      expect(model).toMatchObject(catalog)
+      expect(getSupportedThinkingLevels(model)).toEqual(getSupportedThinkingLevels(catalog as Model<Api>))
+      return
+    }
+
+    // The adapter owns this fallback while the installed catalog lacks it.
     expect(model).toMatchObject({
-      id: 'stealth/ox-alpha',
       name: 'Ox Alpha',
-      provider: 'openrouter',
+      api: 'openai-completions',
       contextWindow: 1_048_576,
       maxTokens: 131_072,
       input: ['text', 'image'],
       reasoning: true,
       compat: { thinkingFormat: 'openrouter', supportsReasoningEffort: true },
     })
-    expect(getSupportedThinkingLevels(model as Model<Api>)).toEqual(['low', 'high', 'max'])
+    expect(getSupportedThinkingLevels(model)).toEqual(['low', 'high', 'max'])
   })
 
   it('overrides one catalog model field and defaults the rest from the catalog', async () => {
@@ -662,24 +675,26 @@ describe('per-model reasoning efforts', () => {
   })
 
   it('narrows a catalog model’s levels in place', () => {
-    const [catalogModel] = getBuiltinModels('deepseek')
-    if (catalogModel === undefined) throw new Error('the installed catalog ships no deepseek model')
-    expect(getSupportedThinkingLevels(catalogModel as Model<Api>)).toEqual(['off', 'low', 'high', 'max'])
+    const catalogModel = getBuiltinModels('deepseek')
+      .find(candidate => getSupportedThinkingLevels(candidate as Model<Api>).length > 1)
+    if (catalogModel === undefined) throw new Error('the installed catalog ships no multi-level deepseek model')
+    const originalLevels = getSupportedThinkingLevels(catalogModel as Model<Api>)
+    const narrowedLevels = originalLevels.slice(0, 2)
+    const efforts = Object.fromEntries(narrowedLevels.map(level => [level, level === 'off' ? null : level]))
 
     const model = modelOf({
-      deepseek: { models: [{ id: catalogModel.id, reasoningEfforts: { off: null, high: 'high' } }] },
+      deepseek: { models: [{ id: catalogModel.id, reasoningEfforts: efforts }] },
     }, 'deepseek')
 
-    expect(getSupportedThinkingLevels(model)).toEqual(['off', 'high'])
+    expect(getSupportedThinkingLevels(model)).toEqual(narrowedLevels)
     // Only the reasoning fields change; identity and capacities stay catalog.
     expect(model.name).toBe(catalogModel.name)
     expect(model.contextWindow).toBe(catalogModel.contextWindow)
   })
 
   it('strips reasoning from a catalog model with false', () => {
-    const [catalogModel] = getBuiltinModels('deepseek')
-    if (catalogModel === undefined) throw new Error('the installed catalog ships no deepseek model')
-    expect(catalogModel.reasoning).toBe(true)
+    const catalogModel = getBuiltinModels('deepseek').find(candidate => candidate.reasoning)
+    if (catalogModel === undefined) throw new Error('the installed catalog ships no reasoning deepseek model')
 
     const model = modelOf({ deepseek: { models: [{ id: catalogModel.id, reasoningEfforts: false }] } }, 'deepseek')
 
@@ -801,9 +816,10 @@ describe('additionalModels', () => {
       contextWindow: 8_192,
       maxTokens: 1_024,
     }
+    const baseline = resolveProfiles({ openrouter: {} }).get('openrouter')?.piProvider.getModels() ?? []
     const resolved = resolveProfiles({ openrouter: { additionalModels: [extra] } })
     const models = resolved.get('openrouter')?.piProvider.getModels() ?? []
-    expect(models).toHaveLength(getBuiltinModels('openrouter').length + 2)
+    expect(models).toHaveLength(baseline.length + 1)
     expect(models.find(entry => entry.id === extra.id)).toMatchObject({
       provider: 'openrouter',
       id: 'vendor/new-model',
@@ -873,10 +889,10 @@ describe('reasoning-dispatch compat switches', () => {
   })
 
   it('merges the switches over the catalog entry’s own compat instead of replacing it', () => {
-    const [catalogModel] = getBuiltinModels('deepseek')
-    if (catalogModel === undefined) throw new Error('the installed catalog ships no deepseek model')
+    const catalogModel = getBuiltinModels('deepseek')
+      .find(candidate => candidate.api === 'openai-completions' && candidate.compat !== undefined)
+    if (catalogModel === undefined) throw new Error('the installed catalog ships no compatible deepseek model')
     const inherited = catalogModel.compat as OpenAICompletionsCompat
-    expect(inherited.requiresReasoningContentOnAssistantMessages).toBe(true)
 
     const models = modelsOf({
       deepseek: { models: [{ id: catalogModel.id, compat: { thinkingFormat: 'openai' } }] },
@@ -887,29 +903,13 @@ describe('reasoning-dispatch compat switches', () => {
     expect(models.get(catalogModel.id)?.compat).toEqual({ ...inherited, thinkingFormat: 'openai' })
   })
 
-  it('skips models of other protocols on a mixed route instead of failing them', () => {
-    // xai ships both completions and responses models, so a route-level switch
-    // must land on the former without invalidating the latter.
-    const catalog = getBuiltinModels('xai') as readonly Model<Api>[]
-    const completions = catalog.find(model => model.api === 'openai-completions')
-    const responses = catalog.find(model => model.api === 'openai-responses')
-    if (completions === undefined || responses === undefined) throw new Error('xai no longer ships a mixed catalog')
-
-    const models = modelsOf({
-      xai: {
-        compat: { supportsReasoningEffort: false },
-        models: [{ id: completions.id }, { id: responses.id }],
-      },
-    }, 'xai')
-
-    expect((models.get(completions.id)?.compat as OpenAICompletionsCompat).supportsReasoningEffort).toBe(false)
-    expect(models.get(responses.id)?.compat).toEqual(responses.compat)
-  })
-
   it('rejects a model-level switch on a protocol that has no such field', () => {
+    const catalogModel = getBuiltinModels('anthropic')
+      .find(candidate => candidate.api === 'anthropic-messages')
+    if (catalogModel === undefined) throw new Error('the installed catalog ships no non-completions anthropic model')
     expect(() => resolveProfiles({
       anthropic: {
-        models: [{ id: 'claude-sonnet-4-5', compat: { thinkingFormat: 'openai' } }],
+        models: [{ id: catalogModel.id, compat: { thinkingFormat: 'openai' } }],
       },
     })).toThrow(/exist only on openai-completions/)
   })

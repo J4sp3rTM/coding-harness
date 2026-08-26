@@ -26,9 +26,9 @@ const REPORT_SECTION_ORDER = 117
 /** Config: how accepted reports are scheduled on the parent. */
 export interface Config {
   /**
-   * Parent scheduling (default `wakeup`). `wakeup` creates one ordinary later
-   * parent turn; `quiet` adds context without waking, so a parked parent learns
-   * of the report only when something else wakes it.
+   * Parent scheduling (default `wakeup`). `wakeup` steers next-step context and
+   * wakes a parked parent; `quiet` adds context without waking, so a parked
+   * parent learns of the report only when something else wakes it.
    */
   reportDelivery?: SubagentReportDelivery
 }

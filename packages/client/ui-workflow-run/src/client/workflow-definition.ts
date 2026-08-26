@@ -32,6 +32,8 @@ export interface WorkflowRunChatData {
   readonly name: string
   readonly status: WorkflowRunStatus
   readonly phases: readonly WorkflowRunPhaseData[]
+  /** User messages this run received while it held the parent's turn. */
+  readonly steeringCount: number
 }
 
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
@@ -49,6 +51,7 @@ interface WorkflowState {
   readonly name: string
   readonly stopReason?: WorkflowStopReason
   readonly members: readonly WorkflowMemberState[]
+  readonly steeringCount: number
 }
 
 /**
@@ -123,6 +126,7 @@ function projectWorkflow(
       ? interrupted ? 'interrupted' : 'running'
       : statusFromStopReason(state.stopReason),
     phases: projectedPhases,
+    steeringCount: state.steeringCount,
   }
 }
 
@@ -153,6 +157,7 @@ export const workflowRunDefinition: ConversationNodeDefinition<WorkflowState> = 
     if (event.type === 'tool-workflow/run-start') return { id: String(event.data.runId), role: 'start' }
     if (event.type === 'tool-workflow/agent-start'
       || event.type === 'tool-workflow/agent-end'
+      || event.type === 'tool-workflow/steering'
       || event.type === 'tool-workflow/run-end') {
       return { id: String(event.data.runId), role: 'update' }
     }
@@ -162,7 +167,7 @@ export const workflowRunDefinition: ConversationNodeDefinition<WorkflowState> = 
     if (match.event.type !== 'tool-workflow/run-start') {
       throw new Error('workflow-run start requires tool-workflow/run-start')
     }
-    return { name: match.event.data.name, members: [] }
+    return { name: match.event.data.name, members: [], steeringCount: 0 }
   },
   update: (context, match) => {
     if (match.event.type === 'tool-workflow/agent-start') {
@@ -170,6 +175,9 @@ export const workflowRunDefinition: ConversationNodeDefinition<WorkflowState> = 
     }
     if (match.event.type === 'tool-workflow/agent-end') {
       return updateAgentEnd(context.state, match.event.data)
+    }
+    if (match.event.type === 'tool-workflow/steering') {
+      return { ...context.state, steeringCount: context.state.steeringCount + 1 }
     }
     if (match.event.type === 'tool-workflow/run-end') {
       return { ...context.state, stopReason: match.event.data.stopReason }

@@ -5,10 +5,10 @@
   - img
   - img
   - text: Context injection @deepseek-ai/dsh-system-prompt
-- button "Think The user wants me to use the workflow tool exactly once with specific parameters. Let me carefully follow the instructions:":
+- 'button "Think The user wants me to use the workflow tool exactly once with specific parameters. Let me carefully follow the instructions: 1. args omitted (so I don''t include it) 2. meta = { \"name\": \"snapshot-flow\", \"description\": \"one child for the snapshot\" } 3. script = as given verbatim 4. After it returns, reply with \"WORKFLOW_DONE\" Let me do exactly that."':
   - img
   - img
-  - text: "Think The user wants me to use the workflow tool exactly once with specific parameters. Let me carefully follow the instructions:"
+  - text: "Think The user wants me to use the workflow tool exactly once with specific parameters. Let me carefully follow the instructions: 1. args omitted (so I don't include it) 2. meta = { \"name\": \"snapshot-flow\", \"description\": \"one child for the snapshot\" } 3. script = as given verbatim 4. After it returns, reply with \"WORKFLOW_DONE\" Let me do exactly that."
 - button "Tool call workflow ·":
   - img
   - img
@@ -16,10 +16,13 @@
 - button "snapshot-flow 1 member Completed" [expanded]:
   - img
   - text: snapshot-flow 1 member Completed
+- text: Received 1 of your messages during this run
 - button "Run 1 member Completed 1" [expanded]:
   - img
   - text: Run 1 member Completed 1
-- text: Reply with exactly the word WF_CHILD_OK and not… Completed
+- text: Reply with exactly the word WF_CHILD_OK and not… Completed While this run is active, keep the final answer concise. {{clock}}
+- button "Copy":
+  - img
 - button "Think The workflow returned successfully with the reply \"WF_CHILD_OK\". Now I need to reply with exactly \"WORKFLOW_DONE\" and stop.":
   - img
   - img

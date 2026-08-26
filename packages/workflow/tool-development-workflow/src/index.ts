@@ -13,6 +13,7 @@ import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import type { WorkflowResult, WorkflowRun } from '@deepseek-ai/dsh-workflow'
 import { createWorkflowRecorder } from '@deepseek-ai/dsh-tool-workflow/recorder'
+import { forwardSteering } from '@deepseek-ai/dsh-tool-workflow/steering'
 import { DEVELOPMENT_WORKFLOW_SETTINGS_NAMESPACE, type DevelopmentWorkflowSettings } from './settings.ts'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import {
@@ -183,10 +184,16 @@ const REPORT_SCHEMA = '{ type: \'object\', properties: { summary: { type: \'stri
 
 const SCRIPT = String.raw`
 const reportSchema = ${REPORT_SCHEMA}
+const applied = []
+async function drainSteering() {
+  const fresh = await steering()
+  for (const text of fresh) applied.push(text)
+}
 function workerPrompt(objective, plan, unit) {
   const permission = unit.role === 'implementation' ? 'You may edit files only within the declared scopes.' : 'You are read-only: do not edit, create, delete, or format files.'
   const roleGuidance = unit.role === 'review' ? 'Identify concrete defects with file and line evidence; do not make fixes.' : unit.role === 'validation' ? 'Run only relevant checks for this unit and report exact commands and results in validationEvidence.' : ''
-  return ['You are a delegated development worker. Work only on the assigned unit in the shared workspace.', 'The parent has already planned the work and will inspect the diff and run authoritative validation.', permission, roleGuidance, 'Declared scopes: ' + JSON.stringify(unit.scopes || []), 'Objective: ' + objective, 'Plan: ' + plan, 'Role: ' + unit.role, 'Unit: ' + unit.id, 'Task: ' + unit.task, 'Do not broaden scope or claim validation you did not run. Return a structured report with a concise summary, changedFiles, validationEvidence, risks, and followUps.'].join('\\n\\n')
+  const operator = applied.length === 0 ? '' : 'The user sent this guidance after the work was planned; it outranks the plan where they conflict:\\n' + applied.map(text => '- ' + text).join('\\n')
+  return ['You are a delegated development worker. Work only on the assigned unit in the shared workspace.', 'The parent has already planned the work and will inspect the diff and run authoritative validation.', permission, roleGuidance, operator, 'Declared scopes: ' + JSON.stringify(unit.scopes || []), 'Objective: ' + objective, 'Plan: ' + plan, 'Role: ' + unit.role, 'Unit: ' + unit.id, 'Task: ' + unit.task, 'Do not broaden scope or claim validation you did not run. Return a structured report with a concise summary, changedFiles, validationEvidence, risks, and followUps.'].filter(part => part !== '').join('\\n\\n')
 }
 async function runOne(unit) {
   const options = { label: unit.id, schema: reportSchema, ...unit.route.provider === undefined ? {} : { provider: unit.route.provider }, ...unit.route.model === undefined ? {} : { model: unit.route.model }, ...unit.route.reasoningEffort === undefined ? {} : { effort: unit.route.reasoningEffort } }
@@ -197,15 +204,20 @@ async function runOne(unit) {
 phase('Development work')
 let reports
 if (args.parallel === true) {
+  await drainSteering()
   reports = await parallel(args.units.map(unit => () => runOne(unit)))
 } else {
   reports = []
-  for (const unit of args.units) reports.push(await runOne(unit))
+  for (const unit of args.units) {
+    await drainSteering()
+    reports.push(await runOne(unit))
+  }
 }
-return { objective: args.objective, reports }
+const unapplied = await steering()
+return { objective: args.objective, reports, steering: { applied, unapplied } }
 `
 
-const DESCRIPTION = 'Submit the minimum planned development work units after you have made a plan. Do not call this for a tiny non-repetitive 1-2 file change with no research and no parallelism; complete that as the parent. Mark repetitive: true only for mechanical repetition across multiple similar elements. Routes are selected automatically: T3 only for simple low-risk repetitive work, T2 for ordinary multi-file implementation/inspection/validation, and T1 only when exceptional is true (architecture, difficult diagnosis, exceptional risk, or high-value final review). simple + low-risk alone is not T3. Configured tier provider/model fields are optional; omitted fields inherit the parent route. A configured reasoning effort applies to that tier\'s selected model; omission uses its provider default. Work runs sequentially unless you explicitly assert independent, non-overlapping scopes with parallel: true. Workers return structured reports; the parent must inspect diffs, run authoritative validation, and decide whether another delegation is needed.'
+const DESCRIPTION = 'Submit the minimum planned development work units after you have made a plan. Do not call this for a tiny non-repetitive 1-2 file change with no research and no parallelism; complete that as the parent. Mark repetitive: true only for mechanical repetition across multiple similar elements. Routes are selected automatically: T3 only for simple low-risk repetitive work, T2 for ordinary multi-file implementation/inspection/validation, and T1 only when exceptional is true (architecture, difficult diagnosis, exceptional risk, or high-value final review). simple + low-risk alone is not T3. Configured tier provider/model fields are optional; omitted fields inherit the parent route. A configured reasoning effort applies to that tier\'s selected model; omission uses its provider default. Work runs sequentially unless you explicitly assert independent, non-overlapping scopes with parallel: true. Workers return structured reports; the parent must inspect diffs, run authoritative validation, and decide whether another delegation is needed. Guidance the user sends while this call runs is passed to the workers that have not started yet and reported back to you in the result; guidance that arrived too late for any worker is reported separately as work you still owe.'
 
 /** Error text when every unit is a tiny non-repetitive change the parent should keep. */
 export const TINY_WORK_REFUSED = 'delegate_work refused: this is a tiny non-repetitive change (about 1-2 files, simple, low-risk, not repetitive). Complete it as the parent without delegation.'
@@ -219,17 +231,61 @@ function stopError(result: WorkflowResult): string | undefined {
   }
 }
 
-function readResult(value: unknown, maxHandoffChars: number): { objective: string; reports: unknown[] } {
+/** What the fixed script reports about operator messages forwarded mid-run. */
+interface SteeringOutcome {
+  /** Messages the workers received, in arrival order. */
+  applied: string[]
+  /** Messages that arrived too late for any worker to receive. */
+  unapplied: string[]
+}
+
+/** The fixed script's return value, as the tool re-reads it host-side. */
+interface DevelopmentResult {
+  objective: string
+  reports: unknown[]
+  steering: SteeringOutcome
+}
+
+/** Read one string array out of the script's steering record. */
+function readSteeringList(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every(entry => typeof entry === 'string')) throw new Error('development workflow returned a malformed result')
+  return value
+}
+
+function readResult(value: unknown, maxHandoffChars: number): DevelopmentResult {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('development workflow returned a malformed result')
   const record = value as Record<string, unknown>
   if (typeof record.objective !== 'string' || !Array.isArray(record.reports)) throw new Error('development workflow returned a malformed result')
+  if (record.steering === null || typeof record.steering !== 'object' || Array.isArray(record.steering)) throw new Error('development workflow returned a malformed result')
+  const steering = record.steering as Record<string, unknown>
   if (JSON.stringify(value).length > maxHandoffChars) throw new Error(`development workflow result exceeds maxHandoffChars (${maxHandoffChars})`)
-  return { objective: record.objective, reports: record.reports }
+  return {
+    objective: record.objective,
+    reports: record.reports,
+    steering: { applied: readSteeringList(steering.applied), unapplied: readSteeringList(steering.unapplied) },
+  }
 }
 
-function render(value: { objective: string; reports: unknown[] }, maxChars: number): string {
-  const text = `Development workflow completed for: ${value.objective}\\nReports:\\n${JSON.stringify(value.reports, null, 2)}`
-  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 16))}\\n… [truncated]`
+/**
+ * The steering section of the rendered result. Messages the workers already
+ * received are named so the parent does not repeat them as new instructions;
+ * messages that arrived too late are named as work the parent still owes.
+ */
+function renderSteering(steering: SteeringOutcome): string {
+  const lines: string[] = []
+  if (steering.applied.length > 0) lines.push(`User guidance sent during this run reached the workers:\n${steering.applied.map(text => `- ${text}`).join('\n')}`)
+  if (steering.unapplied.length > 0) lines.push(`User guidance sent during this run arrived too late for any worker and is NOT reflected in these reports:\n${steering.unapplied.map(text => `- ${text}`).join('\n')}`)
+  return lines.join('\n')
+}
+
+function render(value: DevelopmentResult, maxChars: number): string {
+  const steering = renderSteering(value.steering)
+  const text = [
+    `Development workflow completed for: ${value.objective}`,
+    ...steering === '' ? [] : [steering],
+    `Reports:\n${JSON.stringify(value.reports, null, 2)}`,
+  ].join('\n')
+  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 16))}\n… [truncated]`
 }
 
 function presentCall(args: CallArgs): ToolCallView { return { card: 'generic', title: 'development workflow', rawInput: args.plan } }
@@ -251,7 +307,7 @@ export function apply(ctx: Context, config: Config): void {
         id: { type: 'string', required: true }, task: { type: 'string', required: true }, role: { type: 'string', required: true, enum: ['implementation', 'inspection', 'validation', 'review'] }, complexity: { type: 'string', enum: ['simple', 'ordinary', 'complex'] }, risk: { type: 'string', enum: ['low', 'medium', 'high'] }, exceptional: { type: 'boolean' }, repetitive: { type: 'boolean', description: 'True only for mechanical repetition across multiple similar elements. Required for T3.' }, scopes: { type: 'array', items: { type: 'string' } },
       } } },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { runId: { type: 'string', required: true }, agentsStarted: { type: 'integer', required: true }, result: { type: 'json', required: true } } }, render: (_args, value) => [{ type: 'text', text: render(value.result as unknown as { objective: string; reports: unknown[] }, resolved.maxResultChars) }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { runId: { type: 'string', required: true }, agentsStarted: { type: 'integer', required: true }, result: { type: 'json', required: true } } }, render: (_args, value) => [{ type: 'text', text: render(value.result as unknown as DevelopmentResult, resolved.maxResultChars) }] },
     async execute(args: CallArgs, exec) {
       const parent = exec.agent
       if (parent === undefined) throw new Error('development workflow requires a calling agent (exec.agent was undefined)')
@@ -270,6 +326,10 @@ export function apply(ctx: Context, config: Config): void {
       if (recordsRun) recorder.start(parent.session, run)
       const onAbort = (): void => { run.cancel('parent step aborted') }
       exec.signal.addEventListener('abort', onAbort, { once: true })
+      // The parent cannot claim its inbox until this call returns, so user
+      // input sent mid-run reaches the workers only through this forward. It
+      // is non-consuming: the message also stays in the parent's inbox.
+      const stopForwarding = forwardSteering(ctx, parent, run, recordsRun ? () => { recorder.steering(run.id) } : undefined)
       let settled: WorkflowResult | undefined
       try {
         settled = await run.result
@@ -282,6 +342,7 @@ export function apply(ctx: Context, config: Config): void {
         }
       } finally {
         exec.signal.removeEventListener('abort', onAbort)
+        stopForwarding()
         try {
           await run.dispose()
           if (recordsRun) {

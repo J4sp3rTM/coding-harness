@@ -17,7 +17,7 @@ Status: implemented
 - `report` 工具，其描述现在说明 child 要在结束前调用一次并给出自足的最终结果，并在部分进展会改变 parent 下一步动作时提前调用；
 - 一个 order 为 117 的 `tool:report` 系统提示词 section，用 child 自己的语气承载同一条义务，使从不细读工具描述的 child 仍能收到它。
 
-`reportDelivery` 的默认值现在是 `wakeup`。一条被接受的报告恰好创建一个普通的后续 parent 轮次并唤醒停驻的 parent 驱动；它仍然绝不 steering（中途引导）已开始的轮次。对于宁可让报告无人阅读也要避免轮次放大的部署，`quiet` 依旧可用。
+`reportDelivery` 的默认值是 `wakeup`。一条被接受的报告是 next-step 上下文，并会唤醒停驻的 parent 驱动；到达正在运行的 parent 时，它会加入该轮次的下一个 step（[调度](../bug-fix/2026-08-25-subagent-reports-are-next-step-context.md)）。对于宁可让报告无人阅读也要避免轮次放大的部署，`quiet` 依旧可用。
 
 ### 为什么 section 与描述同时存在
 

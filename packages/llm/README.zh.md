@@ -11,6 +11,8 @@ LLM（大语言模型）seam 及其提供方适配器。`llm` 包同时承担 Se
 | [`llm-retry/`](llm-retry/README.md) | 提供方作用域的重试策略 | 监听 `agent/request-error` |
 | [`llm-deepseek/`](llm-deepseek/README.md) | 直接 DeepSeek 适配器 | 注册到 `ctx.llm` |
 | [`llm-pi-ai/`](llm-pi-ai/README.md) | 多提供方 pi-ai 适配器 | 注册到 `ctx.llm` |
+| [`provider-status/`](provider-status/README.md) | 最近观察到的提供方配额快照 | `ctx.providerStatus` |
+| [`command-usage/`](command-usage/README.md) | 面向人的 `/usage` token、配额与余额报告 | 注册命令 |
 | [`llm-oauth/`](llm-oauth/README.md) | 订阅登录 seam | `ctx.llmOAuth` |
 | [`llm-oauth-local/`](llm-oauth-local/README.md) | 文件后端令牌存储与目录登录流程 | 注册 `ctx.llmOAuth` |
 | [`command-login/`](command-login/README.md) | 面向人的 `/login` 与 `/logout` | 注册命令 |

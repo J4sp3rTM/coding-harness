@@ -173,6 +173,9 @@ export async function runWorkerSession(port: MessagePort, init: WorkerInit): Pro
         // state before running the body, so the script never executes.
         gate.resolve()
         break
+      case HostToWorkerType.Steer:
+        execution.steer(message.text)
+        break
       case HostToWorkerType.ChildStarted:
         children.onChildStarted(message.callId, message.childId)
         break

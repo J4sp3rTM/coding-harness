@@ -19,7 +19,7 @@ It reuses the `DEEPSEEK_API_KEY` credential reference (no new secret) but **not*
 | Key | Default | Meaning |
 |---|---|---|
 | `apiKey` | omitted | Literal DeepSeek API key. Prefer `apiKeyEnv` so no secret enters configuration; a non-empty literal wins. |
-| `apiKeyEnv` | `DEEPSEEK_API_KEY` | Credential reference resolved for each search through `ctx.credentials`, or from the process environment when that seam is absent. A missing value fails the call as `WEB_PROVIDER_CREDENTIAL_MISSING`. |
+| `apiKeyEnv` | `DEEPSEEK_API_KEY` | Credential reference resolved for each search through `ctx.credentials`, or from the process environment when that seam is absent. A missing value makes the provider unavailable to the web seam as `WEB_PROVIDER_CONFIGURED_UNAVAILABLE`; a direct provider call fails as `WEB_PROVIDER_CREDENTIAL_MISSING`. |
 | `baseURL` | `https://api.deepseek.com/anthropic/v1` | Anthropic-compatible endpoint base; `/messages` is appended. Falls back to `$DEEPSEEK_SEARCH_BASE_URL` from any environment layer; do not reuse `$DEEPSEEK_BASE_URL`, which belongs to the chat-completions LLM adapter. An unparseable value makes the provider unavailable. |
 | `model` | `deepseek-v4-flash` | Anthropic-format model name. |
 | `apiVersion` | `2023-06-01` | `anthropic-version` header value. |
@@ -81,6 +81,6 @@ Append-only; newly visible content follows the reusable request prefix and does 
 ## Known Limitations and Deferred Work
 
 - **One search costs a full Messages model turn** — latency plus generated tokens, with up to `maxUses` server-side searches; DeepSeek exposes no dedicated retrieval endpoint.
-- **Dynamic credential availability resolves inside the operation** — the synchronous `available()` contract can establish that a resolver exists but cannot query an asynchronous credential store. A selected keyless provider therefore fails the search with `WEB_PROVIDER_CREDENTIAL_MISSING`; the stable `web_search` schema remains registered. Caller cancellation races this preflight locally, but cannot force an arbitrary credential backend itself to stop work.
+- **Credential availability uses an asynchronous snapshot** — the plugin reads the credentials seam before registration and refreshes the snapshot after committed settings or credential updates. Each refresh fails closed until its authoritative `describe()` result settles, so an ordered web preference reaches its fallback while a key update is in flight; sequence checks prevent stale set results from reopening the provider after an unset.
 - **Over-returned sources still cost tokens** — with no result-count knob on the wire, `maxResults` is enforced only post-hoc by seam truncation.
 - **Uncited results carry no `snippet`** — a source gains one only when a `text` block citation (`cited_text`) matches its URL.

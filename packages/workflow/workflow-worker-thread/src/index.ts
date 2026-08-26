@@ -41,6 +41,11 @@ export interface Config {
   /** vm timeout for the script's initial synchronous slice, inside the worker (default 5000 ms). */
   syncTimeoutMs?: number
   /**
+   * Forwarded operator messages one run's undrained steering mailbox retains
+   * before dropping its oldest entry (default 16).
+   */
+  maxSteeringMessages?: number
+  /**
    * How long after a cancellation an unsettled script may keep running before
    * the run force-settles `cancelled` and its worker is TERMINATED (default
    * 5000 ms); also bounds `dispose()`.
@@ -118,6 +123,7 @@ class WorkerThreadWorkflowEngine extends WorkflowEngine {
     maxTotalAgents: z.natural().min(1).default(1000),
     maxItemsPerCall: z.natural().min(1).default(4096),
     syncTimeoutMs: z.natural().min(1).default(5000),
+    maxSteeringMessages: z.natural().min(1).default(16),
     disposeGraceMs: z.natural().default(5000),
   })
 
@@ -154,6 +160,7 @@ class WorkerThreadWorkflowEngine extends WorkflowEngine {
       maxTotalAgents,
       maxItemsPerCall: this.config.maxItemsPerCall,
       syncTimeoutMs: this.config.syncTimeoutMs,
+      maxSteeringMessages: this.config.maxSteeringMessages,
     }
     const init: WorkerInit = {
       meta,

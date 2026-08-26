@@ -225,7 +225,7 @@ interface Activation {
   disposal: Promise<void> | undefined
   /**
    * Accepted waking message ids this manager has not yet seen leave the inbox.
-   * `Agent.status` is still `idle` in the window between `followup()` and the
+   * `Agent.status` is still `idle` in the window between a waking send and the
    * microtask that admits it, so settlement must not treat that gap as quiet.
    */
   readonly accepted: Set<MessageId>
@@ -646,11 +646,7 @@ export class SubagentContinuationManager {
         senderSessionId: activation.childId,
       },
     })
-    if (delivery === 'wakeup') {
-      this.sendWaking(parent, message, () => { this.sendReport(parent, message, delivery) })
-    } else {
-      this.sendReport(parent, message, delivery)
-    }
+    this.sendReport(parent, message, delivery)
     return message.id
   }
 
@@ -658,7 +654,7 @@ export class SubagentContinuationManager {
    * Perform one waking send to a parent, accounted against that parent's own
    * Activation when it has one. Registering the id before the send is what
    * keeps a continuation-managed parent from being judged quiescent in the
-   * window between `followup()` and the microtask that admits it.
+   * window between the waking send and the microtask that admits it.
    * @param parent - the exact live parent receiving the waking message.
    * @param message - the message whose id is accounted.
    * @param send - the synchronous waking send to perform.
@@ -676,15 +672,26 @@ export class SubagentContinuationManager {
     }
   }
 
-  /** Send one report while translating only the parent's own rejection. */
+  /**
+   * Choose and perform one report delivery without re-reading parent status
+   * after the send path has been selected. Idle wakeup reports use an
+   * activation-accounted waking send; running or aborting reports are injected
+   * into next-step context instead.
+   * @param parent - the exact live parent receiving the report.
+   * @param message - the report message to deliver.
+   * @param delivery - whether the report may wake an idle parent.
+   */
   private sendReport(
     parent: Agent,
     message: ReturnType<typeof createUserMessage>,
     delivery: SubagentReportDelivery,
   ): void {
     try {
-      if (delivery === 'wakeup') parent.followup(message)
-      else parent.inject(message)
+      if (delivery === 'wakeup' && parent.status === 'idle') {
+        this.sendWaking(parent, message, () => { parent.steer(message) })
+      } else {
+        parent.inject(message)
+      }
     } catch (error: unknown) {
       throw new SubagentError(
         'direct parent is not live; report was not delivered',
@@ -1423,7 +1430,7 @@ export class SubagentContinuationManager {
         },
       })
       // A parent whose own teardown already began must not be woken. Waking is
-      // not a queue operation: `followup()` on a quiescent Agent starts a turn,
+      // not a queue operation: `steer()` on a quiescent Agent starts a turn,
       // and `cancel()` does not arm against a later one, so a notice arriving
       // during teardown would spend a model request on an Agent its host is
       // about to dispose — once per tree layer, since each layer's own notice
@@ -1435,16 +1442,15 @@ export class SubagentContinuationManager {
         parent.inject(message)
         return
       }
-      // An idle parent has nothing else to look at, so it gets one ordinary
-      // turn. A busy parent is steered instead of woken: `Inbox.claim()` takes
-      // the whole next-step batch at one boundary, so several children settling
-      // together cost one step rather than one turn each. Steering rather than
-      // injecting closes the window where a driver retires between this status
-      // read and the send, which would strand the notice unclaimed.
-      this.sendWaking(parent, message, () => {
-        if (parent.status === 'idle') parent.followup(message)
-        else parent.steer(message)
-      })
+      // Next-step context, not a next-turn prompt: the Web queue dock is the
+      // user's later-turn list, and a report or settlement is not one of those.
+      // An idle parent is steered so it actually starts a turn. A running
+      // parent — including one whose turn is already aborted — is injected:
+      // `steer()` is a waking send, and Agent.send reclassifies waking input
+      // onto next-turn while the abort is still draining, which is the dock
+      // chip this path exists to avoid. The live driver claims next-step
+      // itself; a Stop'd parent keeps the notice for the next user prompt.
+      this.sendReport(parent, message, 'wakeup')
     } catch (error: unknown) {
       this.ctx.logger.warn(
         `subagent "${activation.childId}" settlement notice was not delivered to its parent: `

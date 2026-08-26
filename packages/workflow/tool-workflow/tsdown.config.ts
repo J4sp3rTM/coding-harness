@@ -1,8 +1,8 @@
 import { defineConfig } from 'tsdown'
 
-/** Build the shared recorder as a separately published runtime subpath. */
+/** Build the shared recorder and steering forwarder as separately published runtime subpaths. */
 export default defineConfig({
-  entry: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/recorder.js'],
+  entry: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/recorder.js', 'lib/types/steering.js'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',

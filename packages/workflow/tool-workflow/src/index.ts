@@ -18,6 +18,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import type { WorkflowResult } from '@deepseek-ai/dsh-workflow'
 import { createWorkflowRecorder } from './recorder.ts'
+import { forwardSteering } from './steering.ts'
 // Declaration merge only: makes ctx.systemPrompt visible for the section registration.
 import type {} from '@deepseek-ai/dsh-system-prompt'
 
@@ -54,6 +55,7 @@ Script-body hooks:
 - \`pipeline(items, ...stages): Promise<any[]>\` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives \`(prev, item, index)\`. An ordinary stage throw drops that ITEM to \`null\` and skips its remaining stages.
 - \`parallel(thunks): Promise<any[]>\` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to \`null\`.
 - \`phase(title)\` — start a progress phase; \`log(message)\` — narrate progress; \`args\` — the tool call's \`args\` input, verbatim.
+- \`steering(): Promise<string[]>\` — drain any messages the user sent since the previous call, in arrival order (resolves \`[]\` immediately when there are none; it never waits for one). Call it between stages in long runs and apply what it returns to the remaining work; messages you never drain are still read by the parent after this call returns.
 
 Misused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item \`null\`.
 
@@ -208,6 +210,11 @@ export function apply(ctx: Context, config: Config): void {
       // this local bridge preserves the tool contract even if an implementation ignores it.
       const onAbort = (): void => { run.cancel('parent step aborted') }
       exec.signal.addEventListener('abort', onAbort, { once: true })
+      // Operator input sent while the script runs would otherwise wait for the
+      // parent's next step boundary, which cannot arrive before this call
+      // returns. Forwarding is non-consuming: the message also stays in the
+      // parent's inbox for its ordinary claim.
+      const stopForwarding = forwardSteering(ctx, parent, run, recordsRun ? () => { recorder.steering(run.id) } : undefined)
 
       let result: WorkflowResult | undefined
       try {
@@ -225,6 +232,7 @@ export function apply(ctx: Context, config: Config): void {
         }
       } finally {
         exec.signal.removeEventListener('abort', onAbort)
+        stopForwarding()
         try {
           // Keep member listeners alive through disposal: an engine may
           // synthesize cancelled member endings while reaching quiescence.

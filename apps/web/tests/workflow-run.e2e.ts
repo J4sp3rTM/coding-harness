@@ -24,6 +24,7 @@ const UI_EXPECTED = join(SNAPSHOT_DIR, 'ui.expected.md')
 const PARENT_FIXTURE = join(REPO_ROOT, 'examples/acp-agent/tests/snapshots/workflow-run/session.jsonl')
 const CHILD_FIXTURE = join(REPO_ROOT, 'examples/acp-agent/tests/snapshots/workflow-run/session.1.jsonl')
 const CHILD_PROMPT = 'Reply with exactly the word WF_CHILD_OK and nothing else.'
+const WORKFLOW_STEER = 'While this run is active, keep the final answer concise.'
 
 describe.skipIf(MODE === 'record')('web e2e: durable workflow run in Chat', () => {
   let scaffold: WebScaffold
@@ -31,6 +32,7 @@ describe.skipIf(MODE === 'record')('web e2e: durable workflow run in Chat', () =
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
   let prompt: string
+  const steeringEvents: SessionEvent[] = []
 
   const waitForParentSettlement = (): Promise<SessionId> => new Promise((resolve, reject) => {
     let dispose = (): void => {}
@@ -53,6 +55,9 @@ describe.skipIf(MODE === 'record')('web e2e: durable workflow run in Chat', () =
       replayFixture: PARENT_FIXTURE,
       replayChildFixtures: [CHILD_FIXTURE],
       paceMs: 25,
+    })
+    scaffold.ctx.on('session/event', (_session, event) => {
+      if (event.type === 'tool-workflow/steering') steeringEvents.push(event)
     })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
@@ -87,6 +92,21 @@ describe.skipIf(MODE === 'record')('web e2e: durable workflow run in Chat', () =
     const member = page.getByRole('button', { name: /^Open Reply with exactly the word/ })
     await member.waitFor({ timeout: 15_000 })
     await member.focus()
+
+    // This is a real user gesture during the foreground workflow call. The
+    // tool forwards it to the run and records the accepted receipt; the parent
+    // inbox remains untouched for its ordinary next step.
+    const inputSteer = page.locator('textarea').first()
+    await inputSteer.fill(WORKFLOW_STEER)
+    await inputSteer.press('Meta+Enter')
+    const steeringReceipt = workflow.locator('[data-workflow-steering="1"]')
+    await steeringReceipt.waitFor({ timeout: 15_000 })
+    expect(await steeringReceipt.textContent()).toContain('Received 1 of your messages during this run')
+    expect(steeringEvents).toHaveLength(1)
+    const steeringEvent = steeringEvents[0]
+    expect(steeringEvent?.type).toBe('tool-workflow/steering')
+    if (steeringEvent?.type !== 'tool-workflow/steering') throw new Error('workflow steering receipt was not recorded')
+    expect(steeringEvent.data.runId).toBeTruthy()
 
     const lightColor = await member.locator('[data-member-label]').evaluate(element => getComputedStyle(element).color)
     await page.setViewportSize({ width: 560, height: 800 })

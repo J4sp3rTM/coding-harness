@@ -70,6 +70,8 @@ export class WorkflowExecution {
   private cancelReason: string | undefined
   private cancelError: WorkflowError | undefined
   private currentPhase: string | undefined
+  /** Forwarded operator messages awaiting the script's next `steering()` drain. */
+  private readonly mailbox: string[] = []
   private readonly context: vm.Context
   private readonly compiled: vm.Script
 
@@ -104,6 +106,7 @@ export class WorkflowExecution {
       pipeline: (items: unknown, ...stages: unknown[]) => this.contain(this.pipeline(items, stages)),
       phase: (title: unknown) => { this.phase(title) },
       log: (message: unknown) => { this.log(message) },
+      steering: () => this.contain(this.steering()),
       // workerData already performed the real cross-thread structured clone.
       args,
     }
@@ -149,6 +152,26 @@ export class WorkflowExecution {
     this.cancelReason = reason
     this.cancelError = new WorkflowError(`workflow run cancelled: ${this.cancelReason}`, 'CANCELLED')
     for (const waiter of this.slotWaiters.splice(0)) waiter.reject(this.cancelledError())
+  }
+
+  /**
+   * Accept one forwarded operator message for the script's next
+   * {@link steering} drain. Called from the session's message handler while
+   * the script runs, so it never blocks on the script reaching a hook.
+   * A cancelled run drops the message: its script is already dying, and the
+   * parent keeps the original message in its own inbox either way. When the
+   * mailbox is full the OLDEST entry is dropped and the drop is narrated, so
+   * a script that never drains cannot grow memory without bound and the
+   * transcript still records that a message was lost.
+   * @param text - the forwarded message's model-facing text.
+   */
+  steer(text: string): void {
+    if (this.isCancelled()) return
+    if (this.mailbox.length >= this.limits.maxSteeringMessages) {
+      this.mailbox.shift()
+      this.observer.log(`steering mailbox is full (${this.limits.maxSteeringMessages}); dropped the oldest undrained operator message`)
+    }
+    this.mailbox.push(text)
   }
 
   /**
@@ -488,6 +511,19 @@ export class WorkflowExecution {
     }
     this.currentPhase = title
     this.observer.phase(title)
+  }
+
+  /**
+   * The `steering()` hook: drain every operator message forwarded since the
+   * previous call. Resolving (rather than returning synchronously) keeps the
+   * hook usable as an await point between stages and matches the other hooks'
+   * asynchronous signature; it never waits for a message to arrive, so a run
+   * with an empty mailbox resolves an empty array immediately.
+   * @returns the drained messages in arrival order.
+   */
+  private steering(): Promise<string[]> {
+    this.throwIfCancelled()
+    return Promise.resolve(this.mailbox.splice(0))
   }
 
   /** The `log(message)` hook: narration to observers. */
