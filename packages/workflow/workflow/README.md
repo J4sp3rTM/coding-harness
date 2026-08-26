@@ -16,7 +16,9 @@ A run is holder-owned. Engine-plugin unload prevents new starts but does not rev
 
 `WorkflowStartRequest` contains `{ meta, script, args?, subagentProvider?, maxTotalAgents?, parent, signal? }`. `parent` attributes every child agent to the invoking agent. `subagentProvider` optionally routes every child in that run without exposing provider choice to the script; omission uses the engine's configured provider. `maxTotalAgents` optionally lowers the engine's deployment ceiling for one run and is likewise invisible to the script. An implementation rejects invalid routes and limits synchronously. `meta` and `args` are plain data, not script fragments.
 
-`WorkflowRun` exposes `{ id, meta, result, cancel(reason?), dispose() }`. `WorkflowResult` contains `{ value, stopReason, error?, agentsStarted }`; `value` is plain JSON data or `null`.
+`WorkflowRun` exposes `{ id, meta, result, cancel(reason?), steer(text), dispose() }`. `WorkflowResult` contains `{ value, stopReason, error?, agentsStarted }`; `value` is plain JSON data or `null`.
+
+`steer(text)` forwards one operator message into a running script, which decides whether and when to consume it, and returns whether the run accepted the message. It is not a second cancellation channel and cannot redirect work a child has already started. Delivery is best effort: a run that no longer admits work drops the message. Consumers forward without consuming, leaving the message in the parent's inbox for the parent's own next step, so a dropped forward loses nothing durable.
 
 ## Events
 

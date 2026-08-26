@@ -41,6 +41,7 @@ class StubEngine extends WorkflowEngine {
           agentsStarted: 0,
         })
       },
+      steer: () => true,
       dispose: () => {
         this.disposed += 1
         return Promise.resolve()

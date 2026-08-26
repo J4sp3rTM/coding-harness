@@ -107,6 +107,7 @@ describe('workflow-run Conversation Definition', () => {
     expect(data).toEqual({
       name: 'audit',
       status: 'failed',
+      steeringCount: 0,
       phases: [
         {
           key: 'value:0:', phase: '',
@@ -158,6 +159,20 @@ describe('workflow-run Conversation Definition', () => {
     })
   })
 
+  it('counts each forwarded user message on the run it reached', () => {
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'tool-workflow/run-start', { runId: 'steered', name: 'steered' }),
+      at(4, 'tool-workflow/steering', { runId: 'steered' }),
+      at(5, 'tool-workflow/agent-start', {
+        runId: 'steered', seq: 1, label: 'worker', childId: 'child-1',
+      }),
+      at(6, 'tool-workflow/steering', { runId: 'steered' }),
+    ])
+    expect(workflowData(value)?.steeringCount).toBe(2)
+  })
+
   it('retains a zero-member run as its own completed node', () => {
     const value = assembler([
       at(1, 'turn/start', { turn: 1 }),
@@ -166,7 +181,7 @@ describe('workflow-run Conversation Definition', () => {
       at(4, 'tool-workflow/run-end', { runId: 'empty', stopReason: 'completed' }),
     ])
     expect(workflowData(value)).toEqual({
-      name: 'empty', status: 'completed', phases: [],
+      name: 'empty', status: 'completed', phases: [], steeringCount: 0,
     })
   })
 
@@ -277,9 +292,14 @@ const listState = (overrides: Partial<SessionListState> = {}): SessionListState 
   ...overrides,
 })
 
-function panelProps(data: WorkflowRunChatData, sessions = listState(), openSession = vi.fn()): WorkflowRunPanelProps {
+/** Panel props for one run; `steeringCount` defaults to the common no-steering case. */
+function panelProps(
+  data: Omit<WorkflowRunChatData, 'steeringCount'> & { steeringCount?: number },
+  sessions = listState(),
+  openSession = vi.fn(),
+): WorkflowRunPanelProps {
   return {
-    node: node(data),
+    node: node({ steeringCount: 0, ...data }),
     sessionId: PARENT_ID,
     useSessions: selector => selector(sessions),
     useSession: (() => undefined) as WorkflowRunPanelProps['useSession'],
@@ -318,9 +338,27 @@ describe('WorkflowRunPanel', () => {
     }
   })
 
+  it('names forwarded mid-run messages only while the run received some', () => {
+    const quiet = render(<WorkflowRunPanel {...panelProps({
+      name: 'audit', status: 'running', phases: [phase()],
+    })} />)
+    expect(quiet.container.querySelector('[data-workflow-steering]')).toBeNull()
+    quiet.unmount()
+
+    render(<WorkflowRunPanel {...panelProps({
+      name: 'audit', status: 'running', phases: [phase()], steeringCount: 1,
+    })} />)
+    expect(screen.getByText('Received 1 of your messages during this run')).toBeTruthy()
+
+    render(<WorkflowRunPanel {...panelProps({
+      name: 'audit', status: 'running', phases: [phase()], steeringCount: 3,
+    })} />)
+    expect(screen.getByText('Received 3 of your messages during this run')).toBeTruthy()
+  })
+
   it('folds each clean transition once and preserves review choices until activity returns', () => {
     const running: WorkflowRunChatData = {
-      name: 'audit', status: 'running', phases: [phase()],
+      name: 'audit', status: 'running', phases: [phase()], steeringCount: 0,
     }
     const view = render(<WorkflowRunPanel {...panelProps(running)} />)
     const phaseCompleted: WorkflowRunChatData = {
@@ -384,7 +422,7 @@ describe('WorkflowRunPanel', () => {
     const phaseClean: WorkflowRunChatData = {
       name: 'phase-cycle', status: 'running',
       phases: [phase({ members: [firstMember] })],
-    }
+      steeringCount: 0 }
     const phaseView = render(<WorkflowRunPanel {...panelProps(phaseClean)} />)
     fireEvent.click(screen.getByRole('button', { name: /Unphased/ }))
     expect(screen.getByText('first')).toBeTruthy()
@@ -400,7 +438,7 @@ describe('WorkflowRunPanel', () => {
   })
 
   it('derives the zero-member running and completed states from the current run status', () => {
-    const running: WorkflowRunChatData = { name: 'empty', status: 'running', phases: [] }
+    const running: WorkflowRunChatData = { name: 'empty', status: 'running', phases: [], steeringCount: 0 }
     const view = render(<WorkflowRunPanel {...panelProps(running)} />)
     expect(screen.queryByRole('button', { name: /^empty/ })).toBeNull()
     expect(screen.getByText('No members started')).toBeTruthy()
@@ -473,7 +511,7 @@ describe('WorkflowRunPanel', () => {
           { seq: 2, label: 'cancelled', childId: 'child-2' as SessionId, status: 'cancelled' },
         ],
       })],
-    }
+      steeringCount: 0 }
     const mixedView = render(<WorkflowRunPanel {...panelProps(mixed)} />)
     expect(screen.getByText('Failed 1 · Cancelled 1')).toBeTruthy()
     expect([...mixedView.container.querySelectorAll('[data-member-status]')]
@@ -499,7 +537,7 @@ describe('WorkflowRunPanel', () => {
   it('opens only a running ordinary-list subagent proven to have this parent', () => {
     const data: WorkflowRunChatData = {
       name: 'audit', status: 'running', phases: [phase()],
-    }
+      steeringCount: 0 }
     const openSession = vi.fn()
     render(<WorkflowRunPanel {...panelProps(data, listState(), openSession)} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open worker' }))
@@ -529,7 +567,7 @@ describe('WorkflowRunPanel', () => {
           seq: 1, label: 'worker', childId: 'child-1' as SessionId, status: memberStatus,
         }],
       })],
-    }
+      steeringCount: 0 }
     render(<WorkflowRunPanel {...panelProps(data, sessions)} />)
     expect(screen.queryByRole('button', { name: 'Open worker' })).toBeNull()
     cleanup()

@@ -16,7 +16,9 @@
 
 `WorkflowStartRequest` 包含 `{ meta, script, args?, subagentProvider?, maxTotalAgents?, parent, signal? }`。`parent` 把每个子 agent（智能体）归属于调用 agent。`subagentProvider` 可以为该次运行的所有子 agent 指定路由，同时不向脚本公开提供方选择；省略时使用引擎配置的提供方。`maxTotalAgents` 可以为一次运行降低引擎的部署上限，同样对脚本不可见。实现会同步拒绝无效路由和限制。`meta` 与 `args` 是普通数据，不是脚本片段。
 
-`WorkflowRun` 公开 `{ id, meta, result, cancel(reason?), dispose() }`。`WorkflowResult` 包含 `{ value, stopReason, error?, agentsStarted }`；`value` 是普通 JSON 数据或 `null`。
+`WorkflowRun` 公开 `{ id, meta, result, cancel(reason?), steer(text), dispose() }`。`WorkflowResult` 包含 `{ value, stopReason, error?, agentsStarted }`；`value` 是普通 JSON 数据或 `null`。
+
+`steer(text)` 把一条 operator（操作者）消息转发进运行中的脚本，由脚本决定是否消费、何时消费，并返回运行是否接受该消息；它不是第二条取消通道，也无法改变子 agent（智能体）已经开始的工作。投递是尽力而为：不再接受工作的运行会丢弃该消息。Consumer（消费方）只转发、不消费，消息仍留在父级 inbox（收件箱）中等待父级自己的下一个 step（步骤）边界，因此转发被丢弃不会损失任何持久内容。
 
 ## 事件
 

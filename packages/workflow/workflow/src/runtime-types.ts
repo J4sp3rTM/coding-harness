@@ -44,6 +44,16 @@ export interface WorkflowRun {
   readonly result: Promise<WorkflowResult>
   /** Cancel the run and its children. */
   cancel(reason?: string): void
+  /**
+   * Forward one operator message into the running script, which decides
+   * whether and when to consume it. Delivery is best effort by contract: a
+   * run that already stopped accepting work drops the message, and the
+   * forwarding consumer leaves the original message in the parent's inbox, so
+   * the parent still reads it at its own next step boundary.
+   * @param text - the forwarded message's model-facing text.
+   * @returns whether the run accepted the message for worker delivery.
+   */
+  steer(text: string): boolean
   /** Cancel if needed and await bounded settlement and cleanup. */
   dispose(): Promise<void>
 }

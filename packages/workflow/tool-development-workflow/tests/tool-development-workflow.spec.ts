@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
+import { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import ToolRuntime, { type ToolExecutionResult, type ToolExecutionToken } from '@deepseek-ai/dsh-tools'
 import { WorkflowEngine, WorkflowRunId } from '@deepseek-ai/dsh-workflow'
 import type { WorkflowResult, WorkflowStartRequest } from '@deepseek-ai/dsh-workflow'
 import * as developmentWorkflow from '../src/index.ts'
@@ -26,6 +27,7 @@ class StubEngine extends WorkflowEngine {
   requests: WorkflowStartRequest[] = []
   disposed = 0
   cancelled: string[] = []
+  steers: string[] = []
   settle!: (result: WorkflowResult) => void
   startError: Error | undefined
   lastId!: WorkflowRunId
@@ -44,6 +46,7 @@ class StubEngine extends WorkflowEngine {
         this.cancelled.push(reason ?? 'cancelled')
         this.settle({ value: null, stopReason: 'cancelled', ...reason === undefined ? {} : { error: reason }, agentsStarted: 0 })
       },
+      steer: (text: string) => { this.steers.push(text); return true },
       dispose: async () => { this.disposed += 1; this.disposeCompleted = true },
     }
   }
@@ -115,7 +118,7 @@ describe('dsh-tool-development-workflow', () => {
     expect(engine.requests[0]!.script).toContain('structured report')
     expect(engine.requests[0]!.script).toContain('You are read-only: do not edit, create, delete, or format files.')
     expect(engine.requests[0]!.script).toContain('Declared scopes:')
-    engine.settle({ value: { objective: 'Ship the change.', reports: [] }, stopReason: 'completed', agentsStarted: 1 })
+    engine.settle({ value: { objective: 'Ship the change.', reports: [], steering: { applied: [], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
     expect((await pending).isError).toBe(false)
     expect(engine.disposed).toBe(1)
   })
@@ -133,7 +136,7 @@ describe('dsh-tool-development-workflow', () => {
       { tier: 'T2', route: { provider: 'implementation-provider', model: 'implementation-model', reasoningEffort: 'high' } },
       { tier: 'T3', route: { provider: 'repeat-provider', model: 'repeat-model', reasoningEffort: 'medium' } },
     ] })
-    engine.settle({ value: { objective: 'x', reports: [] }, stopReason: 'completed', agentsStarted: 3 })
+    engine.settle({ value: { objective: 'x', reports: [], steering: { applied: [], unapplied: [] } }, stopReason: 'completed', agentsStarted: 3 })
     await pending
   })
 
@@ -144,12 +147,12 @@ describe('dsh-tool-development-workflow', () => {
     expect(engine.requests[0]!.args).toMatchObject({ units: [{ route: { provider: 'first-provider', model: 'first-model' } }] })
     await ctx.settings.update(developmentWorkflowSettings.DEVELOPMENT_WORKFLOW_SETTINGS_NAMESPACE, { tiers: { t2: { provider: 'second-provider', model: 'second-model' } } })
     expect(engine.requests[0]!.args).toMatchObject({ units: [{ route: { provider: 'first-provider', model: 'first-model' } }] })
-    engine.settle({ value: { objective: 'x', reports: [] }, stopReason: 'completed', agentsStarted: 1 })
+    engine.settle({ value: { objective: 'x', reports: [], steering: { applied: [], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
     await first
     const second = execute(ctx, { objective: 'x', plan: 'p', workUnits: [unit] }, parent)
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(engine.requests[1]!.args).toMatchObject({ units: [{ route: { provider: 'second-provider', model: 'second-model' } }] })
-    engine.settle({ value: { objective: 'x', reports: [] }, stopReason: 'completed', agentsStarted: 1 })
+    engine.settle({ value: { objective: 'x', reports: [], steering: { applied: [], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
     await second
   })
 
@@ -159,7 +162,7 @@ describe('dsh-tool-development-workflow', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     engine.agentStart(engine.lastId)
     engine.agentEnd(engine.lastId)
-    engine.settle({ value: { objective: 'x', reports: [] }, stopReason: 'completed', agentsStarted: 1 })
+    engine.settle({ value: { objective: 'x', reports: [], steering: { applied: [], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
     await pending
     expect(engine.disposeCompleted).toBe(true)
     expect(session.events.map(event => event.type)).toEqual([
@@ -199,7 +202,7 @@ describe('dsh-tool-development-workflow', () => {
     expect((await malformed).isError).toBe(true)
     const oversized = execute(ctx, { objective: 'x', plan: 'p', workUnits: [unit] }, parent)
     await new Promise(resolve => setTimeout(resolve, 0))
-    engine.settle({ value: { objective: 'x', reports: ['x'.repeat(100)] }, stopReason: 'completed', agentsStarted: 1 })
+    engine.settle({ value: { objective: 'x', reports: ['x'.repeat(100)], steering: { applied: [], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
     expect((await oversized).isError).toBe(true)
   })
 
@@ -231,7 +234,7 @@ describe('dsh-tool-development-workflow', () => {
     }, parent)
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(engine.requests[0]!.args).toMatchObject({ units: [{ tier: 'T3' }] })
-    engine.settle({ value: { objective: 'Fill five returns.', reports: [] }, stopReason: 'completed', agentsStarted: 1 })
+    engine.settle({ value: { objective: 'Fill five returns.', reports: [], steering: { applied: [], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
     expect((await pending).isError).toBe(false)
   })
 
@@ -247,7 +250,7 @@ describe('dsh-tool-development-workflow', () => {
     }, parent)
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(engine.requests[0]!.args).toMatchObject({ units: [{ tier: 'T2' }, { tier: 'T1' }] })
-    engine.settle({ value: { objective: 'Ship a store and review the contract rename.', reports: [] }, stopReason: 'completed', agentsStarted: 2 })
+    engine.settle({ value: { objective: 'Ship a store and review the contract rename.', reports: [], steering: { applied: [], unapplied: [] } }, stopReason: 'completed', agentsStarted: 2 })
     await pending
   })
 
@@ -261,8 +264,84 @@ describe('dsh-tool-development-workflow', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(engine.requests).toHaveLength(1)
     expect(engine.requests[0]!.args).toMatchObject({ units: [{ tier: 'T2' }] })
-    engine.settle({ value: { objective: 'Fix one greeting.', reports: [] }, stopReason: 'completed', agentsStarted: 1 })
+    engine.settle({ value: { objective: 'Fix one greeting.', reports: [], steering: { applied: [], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
     await pending
+  })
+
+  it('forwards user-origin inbox insertions into the running run and stops at settlement', async () => {
+    const { ctx, engine, parent } = await setup()
+    const pending = execute(ctx, { objective: 'Ship the change.', plan: 'Inspect then validate.', workUnits: [unit] }, parent)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+      message: createUserMessage({ content: [{ type: 'text', text: 'skip the rename' }], source: { kind: 'user' } }),
+    })
+    agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+      message: createUserMessage({ content: [{ type: 'text', text: 'skills catalog' }], source: { kind: 'plugin', plugin: 'skill' } }),
+    })
+    expect(engine.steers).toEqual(['skip the rename'])
+    engine.settle({ value: { objective: 'Ship the change.', reports: [], steering: { applied: ['skip the rename'], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
+    await pending
+    agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+      message: createUserMessage({ content: [{ type: 'text', text: 'after the run' }], source: { kind: 'user' } }),
+    })
+    expect(engine.steers).toEqual(['skip the rename'])
+  })
+
+  it('names applied and too-late steering in the rendered result', async () => {
+    const { ctx, engine, parent } = await setup()
+    const pending = execute(ctx, { objective: 'Ship the change.', plan: 'Inspect then validate.', workUnits: [unit] }, parent)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    engine.settle({
+      value: { objective: 'Ship the change.', reports: [{ id: 'inspect' }], steering: { applied: ['skip the rename'], unapplied: ['also update the README'] } },
+      stopReason: 'completed',
+      agentsStarted: 1,
+    })
+    const result = await pending
+    expect(result.isError).toBe(false)
+    const rendered = (result.content[0] as { text: string }).text
+    expect(rendered).toContain('User guidance sent during this run reached the workers:\n- skip the rename')
+    expect(rendered).toContain('arrived too late for any worker and is NOT reflected in these reports:\n- also update the README')
+    // The rendered result is read by a model: its newlines are real, not escaped.
+    expect(rendered).not.toContain('\\n')
+  })
+
+  it('rejects a result whose steering record is malformed or missing', async () => {
+    const { ctx, engine, parent } = await setup()
+    const malformed = execute(ctx, { objective: 'Ship the change.', plan: 'Inspect then validate.', workUnits: [unit] }, parent)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    engine.settle({ value: { objective: 'x', reports: [], steering: { applied: [7], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
+    const malformedResult = await malformed
+    expect(malformedResult.isError).toBe(true)
+    expect((malformedResult.content[0] as { text: string }).text).toContain('malformed result')
+
+    const missing = execute(ctx, { objective: 'Ship the change.', plan: 'Inspect then validate.', workUnits: [unit] }, parent)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    engine.settle({ value: { objective: 'x', reports: [] }, stopReason: 'completed', agentsStarted: 1 })
+    const missingResult = await missing
+    expect(missingResult.isError).toBe(true)
+    expect((missingResult.content[0] as { text: string }).text).toContain('malformed result')
+  })
+
+  it('still forwards steering from a nested transport call that writes no durable run record', async () => {
+    const { ctx, engine, parent, session } = await setup()
+    // A transport sub-dispatch carries a parent token, which suppresses the
+    // durable record. Forwarding does not depend on that recording decision.
+    const pending = ctx.tools.execute({
+      name: 'delegate_work',
+      arguments: { objective: 'Ship the change.', plan: 'Inspect then validate.', workUnits: [unit] },
+      callId: CallId('development-nested'),
+      parent: Symbol('outer-run-code') as ToolExecutionToken,
+      signal: new AbortController().signal,
+      agent: parent,
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    agentEvents(ctx, parent).emit('agent/inbox/inserted', {
+      message: createUserMessage({ content: [{ type: 'text', text: 'nested guidance' }], source: { kind: 'user' } }),
+    })
+    expect(engine.steers).toEqual(['nested guidance'])
+    engine.settle({ value: { objective: 'Ship the change.', reports: [], steering: { applied: ['nested guidance'], unapplied: [] } }, stopReason: 'completed', agentsStarted: 1 })
+    expect((await pending).isError).toBe(false)
+    expect(session.events).toEqual([])
   })
 
   it('unregisters the tool and prompt section on HMR disposal', async () => {

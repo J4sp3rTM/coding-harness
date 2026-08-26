@@ -842,7 +842,7 @@ Source: [`packages/core/session/src/types.ts:291`](../packages/core/session/src/
 'tool-workflow/agent-end': ToolWorkflowAgentEndData
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:68`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/workflow/tool-workflow/src/types.ts:77`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowagent-start--log-only"></a>
 
@@ -856,7 +856,7 @@ Source: [`packages/workflow/tool-workflow/src/types.ts:68`](../packages/workflow
 'tool-workflow/agent-start': ToolWorkflowAgentStartData
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:63`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/workflow/tool-workflow/src/types.ts:72`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowrun-end--log-only"></a>
 
@@ -870,7 +870,7 @@ Source: [`packages/workflow/tool-workflow/src/types.ts:63`](../packages/workflow
 'tool-workflow/run-end': ToolWorkflowRunEndData
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:73`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/workflow/tool-workflow/src/types.ts:88`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowrun-start--log-only"></a>
 
@@ -884,7 +884,22 @@ Source: [`packages/workflow/tool-workflow/src/types.ts:73`](../packages/workflow
 'tool-workflow/run-start': ToolWorkflowRunStartData
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:58`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/workflow/tool-workflow/src/types.ts:67`](../packages/workflow/tool-workflow/src/types.ts)
+
+<a id="tool-workflowsteering--log-only"></a>
+
+#### `tool-workflow/steering` — log-only
+
+```ts persistence-catalog
+/**
+ * Records one user message accepted by this run mid-flight; it does not
+ * assert that a worker acted on the message.
+ * @param data - the receiving run's identity.
+ */
+'tool-workflow/steering': ToolWorkflowSteeringData
+```
+
+Source: [`packages/workflow/tool-workflow/src/types.ts:83`](../packages/workflow/tool-workflow/src/types.ts)
 
 ### `turn/*`
 

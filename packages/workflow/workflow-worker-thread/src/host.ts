@@ -204,6 +204,19 @@ export class WorkerRun implements WorkflowRun {
   }
 
   /**
+   * Forward one operator message to the running script's steering mailbox.
+   * A run that is cancelled, settled, or whose worker is gone drops the
+   * message: the parent's inbox still holds it for the parent's own next
+   * step boundary, so nothing the operator wrote is lost by the drop.
+   * @param text - the forwarded message's model-facing text.
+   * @returns whether the worker accepted the message for delivery.
+   */
+  steer(text: string): boolean {
+    if (this.settled || this.terminalClaimed || this.cancelReason !== undefined) return false
+    return this.post(HostToWorkerType.Steer, { text })
+  }
+
+  /**
    * Cancel + bounded settle + termination. Host-drives every registered
    * child's disposal IMMEDIATELY — a wedged worker can relay no dispose RPC,
    * and deferring child teardown to the post-terminate reap would spend the
@@ -252,16 +265,19 @@ export class WorkerRun implements WorkflowRun {
   }
 
   /** Post one message to the worker (payload looked up from the tag's map entry), tolerating a thread that is already gone. */
-  private post<T extends HostToWorkerType>(type: T, payload: HostToWorkerPayloads[T]): void {
-    if (this.workerGone || this.workerDeathObserved) return
+  private post<T extends HostToWorkerType>(type: T, payload: HostToWorkerPayloads[T]): boolean {
+    if (this.workerGone || this.workerDeathObserved) return false
     try {
       this.worker.postMessage({ type, ...payload })
+      return true
     } catch (error: unknown) {
       // Only a teardown race can land here (every engine message is JSON
       // data, so serialization cannot fail); there is nothing left to
       // deliver to — log and move on.
       /* v8 ignore next -- postMessage teardown race (a throw between exit and its event): not constructible in-process */
       this.ctx.logger.warn(`workflow-worker-thread: postMessage failed: ${renderThrown(error)}`)
+      /* v8 ignore next -- the catch itself is a teardown race that cannot be constructed in-process */
+      return false
     }
   }
 

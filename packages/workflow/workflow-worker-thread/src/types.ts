@@ -22,6 +22,13 @@ export interface WorkerLimits {
   maxItemsPerCall: number
   /** vm timeout for the script's initial synchronous slice (inside the worker). */
   syncTimeoutMs: number
+  /**
+   * Forwarded operator messages the undrained steering mailbox retains. A
+   * script that never calls `steering()` cannot grow the mailbox without
+   * bound: the oldest entry is dropped once the bound is reached, and the drop
+   * is narrated through `log`.
+   */
+  maxSteeringMessages: number
 }
 
 /** The `workerData` payload one run is initialized with (host → worker, once, at spawn). */

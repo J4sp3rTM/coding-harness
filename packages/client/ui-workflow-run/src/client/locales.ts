@@ -9,6 +9,8 @@ export const en = {
   'run.members.one': '{count} member',
   'run.members.other': '{count} members',
   'run.empty': 'No members started',
+  'run.steering.one': 'Received 1 of your messages during this run',
+  'run.steering.other': 'Received {count} of your messages during this run',
   'phase.unassigned': 'Unphased',
   'phase.empty': 'Empty phase name',
   'statusCount.running': 'Running {count}',

@@ -6,6 +6,12 @@ The model-facing `delegate_work` tool delegates a minimum set of planned coding 
 
 T3 is selected only for simple low-risk work marked `repetitive`. `simple` + `low` alone is T2, not T3. T2 is the default for ordinary or complex implementation, inspection, and validation. T1 is reserved for units with `exceptional: true` (architecture, difficult diagnosis, exceptional risk, or high-value final review). The model cannot select a tier. A call whose every unit is a tiny non-repetitive 1–2 file change is refused so the parent keeps it; `refuseTinyNonRepetitive` (default true) and `tinyMaxFiles` (default 2) make that configurable. The host settings namespace `development-workflow` optionally overrides each tier's provider, model, and model-specific reasoning effort; omitted fields inherit the calling agent's route or use the selected model's provider default. Member start events record that configured or inherited route, including whether effort was supplied or left to the provider default. Changes apply to the next call, while an in-flight run keeps its captured routes. Execution is sequential by default. `parallel: true` requires every unit to declare non-overlapping scopes, including parent/child path overlap, and remains unsafe for generated or other shared-workspace state.
 
+## Mid-run steering
+
+Messages the user sends while a delegation runs are forwarded into the running script by the shared [forwarder](../tool-workflow/README.md#mid-run-steering) and drained before each remaining unit starts, so guidance reaches workers that have not begun. Each drained message is prefixed to subsequent worker prompts as guidance that outranks the plan where they conflict. A unit already in flight never receives it, and under `parallel: true` only the drain before the batch applies.
+
+The result names both outcomes: `steering.applied` lists what reached workers, and `steering.unapplied` lists messages that arrived too late for any worker. The rendered result repeats both lists so the parent neither reissues applied guidance nor silently drops late guidance. Forwarding is non-consuming — the parent also claims each message at its own next step boundary.
+
 Implementation workers may edit only their declared scopes. Inspection, validation, and review workers are explicitly read-only; validation reports exact relevant checks, and review reports concrete defects. Workers return `summary`, `changedFiles`, `validationEvidence`, `risks`, and `followUps`. Their reports are evidence for the parent, not certification. The parent must inspect diffs, run authoritative validation, fix issues, and decide whether another delegation is necessary. Top-level runs and members are recorded through the shared `tool-workflow/*` durable events.
 
 ## Config
@@ -44,7 +50,7 @@ Prefix-stable while the tool guidance remains unchanged; activation, disposal, o
 
 #### What the model sees
 
-The model submits `objective`, `plan`, `workUnits`, and optional `parallel`; the shared workflow envelope is described by the generated [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow). A successful result contains the workflow run id, agent count, and structured reports. Cancellation and engine failures are errors.
+The model submits `objective`, `plan`, `workUnits`, and optional `parallel`; the shared workflow envelope is described by the generated [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow). A successful result contains the workflow run id, agent count, structured reports, and the `steering.applied` / `steering.unapplied` record of mid-run guidance, which the rendered text repeats. Cancellation and engine failures are errors.
 
 #### Token effect
 

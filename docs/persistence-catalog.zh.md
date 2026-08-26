@@ -844,7 +844,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool-workflow/agent-end': ToolWorkflowAgentEndData
 ```
 
-来源：[`packages/workflow/tool-workflow/src/types.ts:68`](../packages/workflow/tool-workflow/src/types.ts)
+来源：[`packages/workflow/tool-workflow/src/types.ts:77`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowagent-start--log-only"></a>
 
@@ -858,7 +858,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool-workflow/agent-start': ToolWorkflowAgentStartData
 ```
 
-来源：[`packages/workflow/tool-workflow/src/types.ts:63`](../packages/workflow/tool-workflow/src/types.ts)
+来源：[`packages/workflow/tool-workflow/src/types.ts:72`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowrun-end--log-only"></a>
 
@@ -872,7 +872,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool-workflow/run-end': ToolWorkflowRunEndData
 ```
 
-来源：[`packages/workflow/tool-workflow/src/types.ts:73`](../packages/workflow/tool-workflow/src/types.ts)
+来源：[`packages/workflow/tool-workflow/src/types.ts:88`](../packages/workflow/tool-workflow/src/types.ts)
 
 <a id="tool-workflowrun-start--log-only"></a>
 
@@ -886,7 +886,22 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool-workflow/run-start': ToolWorkflowRunStartData
 ```
 
-来源：[`packages/workflow/tool-workflow/src/types.ts:58`](../packages/workflow/tool-workflow/src/types.ts)
+来源：[`packages/workflow/tool-workflow/src/types.ts:67`](../packages/workflow/tool-workflow/src/types.ts)
+
+<a id="tool-workflowsteering--log-only"></a>
+
+#### `tool-workflow/steering` — log-only
+
+```ts persistence-catalog
+/**
+ * Records one user message accepted by this run mid-flight; it does not
+ * assert that a worker acted on the message.
+ * @param data - the receiving run's identity.
+ */
+'tool-workflow/steering': ToolWorkflowSteeringData
+```
+
+来源：[`packages/workflow/tool-workflow/src/types.ts:83`](../packages/workflow/tool-workflow/src/types.ts)
 
 ### `turn/*`
 

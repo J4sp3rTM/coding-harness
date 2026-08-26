@@ -92,7 +92,7 @@ interface WorkflowResult {
 
 ## A live run: `WorkflowRun`
 
-The handle the consumer holds while a script executes. The consumer awaits `result`, may `cancel` mid-flight, and MUST `dispose` on every path. `result` does NOT reject — a script failure resolves with `stopReason: 'error'` — and once the run is cancelled it SETTLES within the engine's bounded grace even if the script itself never settles (the engine force-settles `cancelled`; the worker-thread engine then terminates the script's worker), so a consumer awaiting `result` is never wedged past a cancellation. `dispose()` = cancel + that bounded settle + child quiescence; it never hangs on a stuck script.
+The handle the consumer holds while a script executes. The consumer awaits `result`, may `cancel` mid-flight, and MUST `dispose` on every path. `result` does NOT reject — a script failure resolves with `stopReason: 'error'` — and once the run is cancelled it SETTLES within the engine's bounded grace even if the script itself never settles (the engine force-settles `cancelled`; the worker-thread engine then terminates the script's worker), so a consumer awaiting `result` is never wedged past a cancellation. `dispose()` = cancel + that bounded settle + child quiescence; it never hangs on a stuck script. `steer(text)` forwards one operator message into the running script — the script decides whether and when to consume it, and a run that no longer admits work drops the message, which costs nothing durable because the forwarding consumer leaves that message in the parent's inbox.
 
 ```ts type-equiv
 /**
@@ -106,6 +106,16 @@ interface WorkflowRun {
   readonly result: Promise<WorkflowResult>
   /** Cancel the run and its children. */
   cancel(reason?: string): void
+  /**
+   * Forward one operator message into the running script, which decides
+   * whether and when to consume it. Delivery is best effort by contract: a
+   * run that already stopped accepting work drops the message, and the
+   * forwarding consumer leaves the original message in the parent's inbox, so
+   * the parent still reads it at its own next step boundary.
+   * @param text - the forwarded message's model-facing text.
+   * @returns whether the run accepted the message for worker delivery.
+   */
+  steer(text: string): boolean
   /** Cancel if needed and await bounded settlement and cleanup. */
   dispose(): Promise<void>
 }

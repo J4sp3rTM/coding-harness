@@ -2,10 +2,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEventMap } from '@deepseek-ai/dsh-session'
 import type { WorkflowRun, WorkflowRunId, WorkflowStopReason } from '@deepseek-ai/dsh-workflow'
-import type { ToolWorkflowAgentEndData, ToolWorkflowAgentStartData, ToolWorkflowRunEndData, ToolWorkflowRunStartData } from './types.ts'
+import type { ToolWorkflowAgentEndData, ToolWorkflowAgentStartData, ToolWorkflowRunEndData, ToolWorkflowRunStartData, ToolWorkflowSteeringData } from './types.ts'
 
 interface WorkflowRecorder {
   start(session: Session, run: WorkflowRun): void
+  /** Record that one user message reached this run while it held the parent's turn. */
+  steering(runId: WorkflowRunId): void
   finish(runId: WorkflowRunId, stopReason: WorkflowStopReason): void
   abandon(runId: WorkflowRunId): void
 }
@@ -14,6 +16,7 @@ interface ToolWorkflowRecordEventMap {
   'tool-workflow/run-start': ToolWorkflowRunStartData
   'tool-workflow/agent-start': ToolWorkflowAgentStartData
   'tool-workflow/agent-end': ToolWorkflowAgentEndData
+  'tool-workflow/steering': ToolWorkflowSteeringData
   'tool-workflow/run-end': ToolWorkflowRunEndData
 }
 
@@ -80,6 +83,11 @@ export function createWorkflowRecorder(ctx: Context): WorkflowRecorder {
         runId: run.id,
         name: run.meta.name,
       })) active.set(run.id, session)
+    },
+    steering(runId) {
+      const session = active.get(runId)
+      if (session === undefined) return
+      if (!append(session, 'tool-workflow/steering', { runId })) active.delete(runId)
     },
     finish(runId, stopReason) {
       const session = active.get(runId)

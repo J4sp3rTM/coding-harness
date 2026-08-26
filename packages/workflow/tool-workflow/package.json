@@ -30,6 +30,10 @@
       "types": "./lib/types/recorder.d.ts",
       "default": "./lib/recorder.js"
     },
+    "./steering": {
+      "types": "./lib/types/steering.d.ts",
+      "default": "./lib/steering.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
@@ -37,6 +41,7 @@
     "lib/index.js",
     "lib/invariant.js",
     "lib/recorder.js",
+    "lib/steering.js",
     "lib/types/**/*.js",
     "lib/types/**/*.d.ts"
   ],

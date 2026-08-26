@@ -54,6 +54,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'tool-workflow/agent-start',
   'tool-workflow/run-end',
   'tool-workflow/run-start',
+  'tool-workflow/steering',
   'tool/call',
   'tool/code-dispatch',
   'tool/code-dispatch-start',

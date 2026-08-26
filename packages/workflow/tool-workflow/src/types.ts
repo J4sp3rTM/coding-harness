@@ -43,6 +43,15 @@ export interface ToolWorkflowAgentEndData {
   readonly outcome: WorkflowAgentOutcome
 }
 
+/**
+ * Records that one user message was accepted by a workflow while it held the
+ * parent's turn. The message itself stays in `user/message`; this receipt says
+ * only that the run accepted the input, not that any worker acted on it.
+ */
+export interface ToolWorkflowSteeringData {
+  readonly runId: WorkflowRunId
+}
+
 /** Settles one workflow run after its live resources reach quiescence. */
 export interface ToolWorkflowRunEndData {
   readonly runId: WorkflowRunId
@@ -66,6 +75,12 @@ declare module '@deepseek-ai/dsh-session/types' {
      * @param data - run identity, paired member sequence, and outcome.
      */
     'tool-workflow/agent-end': ToolWorkflowAgentEndData
+    /**
+     * Records one user message accepted by this run mid-flight; it does not
+     * assert that a worker acted on the message.
+     * @param data - the receiving run's identity.
+     */
+    'tool-workflow/steering': ToolWorkflowSteeringData
     /**
      * Closes one workflow record after cleanup.
      * @param data - stable run identity and terminal reason.

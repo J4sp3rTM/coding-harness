@@ -31,6 +31,7 @@ Inside the worker, the script receives `args` and these hooks:
 - `parallel(thunks)` runs thunks under the configured concurrency limit.
 - `pipeline(items, ...stages)` passes `(previous, item, index)` without a cross-stage barrier.
 - `phase(title)` and `log(message)` emit observer narration.
+- `steering()` drains the operator messages forwarded since the previous call, in arrival order. It resolves immediately, with an empty array when none arrived, so a script polls it between stages rather than waiting on it.
 
 Unknown options, malformed arguments, unsupported schemas, tripped caps, provider-start failures, and infrastructure result failures are fatal workflow errors. No timers, filesystem API, or Node globals are intentionally injected, though the trust caveat above still applies.
 
@@ -72,6 +73,12 @@ Worker error, message failure, or premature exit closes message admission before
 
 The host keeps a ledger of forwarded child starts. A graceful worker supplies their ends; death or force termination synthesizes any missing end as cancelled. Every forwarded `workflow/agent-start` is therefore paired exactly once, although cleanup after an already-arrived workflow result may complete afterward.
 
+## Mid-run steering
+
+`WorkflowRun.steer(text)` posts one operator message to the running script and returns whether the run accepted it; the worker appends accepted messages to a per-run mailbox that `steering()` drains. A run that is already cancelled, settled, or whose worker is gone drops the message, and so does a cancelled worker-side execution: the forwarding consumer leaves the message in the parent's inbox, so nothing the operator wrote depends on this delivery.
+
+The mailbox retains at most `maxSteeringMessages` undrained messages. At the bound the OLDEST message is dropped and the drop is narrated through `log`, so a script that never drains cannot grow memory without bound and the transcript still records the loss.
+
 ## Config
 
 | Key | Default | Meaning |
@@ -81,6 +88,7 @@ The host keeps a ledger of forwarded child starts. A graceful worker supplies th
 | `maxTotalAgents` | `1000` | Total `agent()` calls in one run. |
 | `maxItemsPerCall` | `4096` | Items accepted by one `parallel()` or `pipeline()` call. |
 | `syncTimeoutMs` | `5000` | VM timeout for the script's initial synchronous slice. |
+| `maxSteeringMessages` | `16` | Undrained operator messages one run's steering mailbox retains. |
 | `disposeGraceMs` | `5000` | Bound before force-settlement/termination and for public disposal. |
 
 An owning consumer may set `WorkflowStartRequest.subagentProvider` and `WorkflowStartRequest.maxTotalAgents` for one run. These are engine-level policy, not script hooks or model-facing options; the ordinary `workflow` tool leaves both unset. A per-run total-child cap may lower but never raise the configured `maxTotalAgents` ceiling.

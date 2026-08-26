@@ -26,7 +26,7 @@ class TestSettings extends SettingsProvider {
 
 class StubEngine extends WorkflowEngine {
   start(_request: WorkflowStartRequest) {
-    return { id: WorkflowRunId('loader-test'), meta: { name: 'test', description: 'test' }, result: Promise.resolve({ value: null, stopReason: 'completed' as const, agentsStarted: 0 }), cancel: () => {}, dispose: async () => {} }
+    return { id: WorkflowRunId('loader-test'), meta: { name: 'test', description: 'test' }, result: Promise.resolve({ value: null, stopReason: 'completed' as const, agentsStarted: 0 }), cancel: () => {}, steer: () => true, dispose: async () => {} }
   }
 }
 

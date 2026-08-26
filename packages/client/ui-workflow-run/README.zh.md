@@ -2,11 +2,13 @@
 
 [English](README.md) | 中文
 
-这个浏览器插件把持久化的顶层工作流运行重建为独立 Chat 节点。它消费由 [`dsh-tool-workflow`](../../workflow/tool-workflow/README.md) 拥有的四类 `tool-workflow/*` Session 事件，注册一个 `ConversationNodeDefinition`，并通过 keyed `conversation.chat.node` slot 渲染，不改变现有工作流工具卡。
+这个浏览器插件把持久化的顶层工作流运行重建为独立 Chat 节点。它消费由 [`dsh-tool-workflow`](../../workflow/tool-workflow/README.md) 拥有的五类 `tool-workflow/*` Session 事件，注册一个 `ConversationNodeDefinition`，并通过 keyed `conversation.chat.node` slot 渲染，不改变现有工作流工具卡。
 
 ## 持久状态与回放
 
 `tool-workflow/run-start` 以 `runId` 创建唯一 Context；成员开始、成员结束和运行结束事件按日志顺序更新该 Context。只有 update 的历史尾页会保持 pending，直到更早页面补入唯一 start；此后 prepend、完整回放和实时 append 得到相同状态。若所属 Turn 或 Step 已关闭但终点事件缺失，界面把相应运行或成员显示为已中断，而不改写工具结果。
+
+每条 `tool-workflow/steering` 记录都会让该运行的计数加一：前台运行占用父级 turn（轮次）期间，父级无法领取用户消息，因此由运行本身说明它收到了这条消息。该计数渲染为阶段列表上方的一行三级文字，计数为零时不出现。它统计的是运行收到的消息数，而不是 Worker 实际据此行动的消息数——在所有单元都已开始之后到达的消息不会送达任何 Worker，两者的区别由工具结果说明。
 
 阶段组只来自真正开始过的成员。完全相同的阶段字符串归入同一组，字段缺省与空字符串保持不同身份；成员结算只改变状态，不删除或重排成员。
 

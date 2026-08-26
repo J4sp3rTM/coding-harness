@@ -63,6 +63,10 @@ function memberCount(count: number, t: WorkflowRunPanelProps['t']): string {
   return t(count === 1 ? 'run.members.one' : 'run.members.other', { count })
 }
 
+function steeringNotice(count: number, t: WorkflowRunPanelProps['t']): string {
+  return t(count === 1 ? 'run.steering.one' : 'run.steering.other', { count })
+}
+
 function phaseRequiresExpansion(phase: WorkflowRunPhaseData): boolean {
   return phase.members.some(member => member.status !== 'completed')
 }
@@ -254,6 +258,11 @@ export function WorkflowRunPanel({ node, sessionId, useSessions, openSession, t 
         t={t}
       >
         <div className={css.phaseList}>
+          {node.data.steeringCount > 0 && (
+            <span className={css.steering} data-workflow-steering={node.data.steeringCount}>
+              {steeringNotice(node.data.steeringCount, t)}
+            </span>
+          )}
           {node.data.phases.length === 0
             ? <span className={css.empty}>{t('run.empty')}</span>
             : node.data.phases.map(phase => (

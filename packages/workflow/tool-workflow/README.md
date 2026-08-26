@@ -14,7 +14,17 @@ Collection is synchronous (like [`dsh-tool-subagent`](../../subagent/tool-subage
 
 For a root transport execution (`exec.parent` absent), the tool also projects the run into the calling Agent's Session: run-start after `start()` returns, matching member starts and endings filtered by `run.id`, then run-end only after `run.result` is available and `dispose()` has reached quiescence. Nested transport calls execute normally but write no workflow record. The first failed Session append disables later recording for that run, emits one warning, and leaves either no record or a legal continuous prefix without changing the tool result or cleanup.
 
-The browser-safe `@deepseek-ai/dsh-tool-workflow/types` subpath owns these four log-only event payloads and their `SessionEventMap` declaration. The package invariant rejects duplicate starts, unpaired members, terminal events with open members, and updates after run-end on both cold load and live append while accepting missing terminal suffixes.
+The browser-safe `@deepseek-ai/dsh-tool-workflow/types` subpath owns these five log-only event payloads and their `SessionEventMap` declaration. The package invariant rejects duplicate starts, unpaired members, terminal events with open members, and updates after run-end on both cold load and live append while accepting missing terminal suffixes.
+
+## Mid-run steering
+
+A foreground run occupies the whole span between two of the parent's step boundaries, so a message the user sends while the script runs cannot be claimed by the parent until this call returns. For the run's lifetime the tool forwards every user-origin insertion into the parent's inbox to `run.steer(text)`, where the script reads it through `steering()`. Forwarding is non-consuming and never rewrites history: the message stays in the parent's inbox and reaches the parent model at its ordinary next step boundary. An accepted forward also writes one `tool-workflow/steering` receipt containing only the run id; it records run acceptance, not worker action, and does not duplicate message content, so the durable transcript remains identical whether or not a script drained it. The [steering receipt Agent Note](../../../.agents/notes/implemented/feature/2026-08-26-workflow-run-steering-record.md) owns the UI projection of this metadata.
+
+Only `source.kind === 'user'` insertions are forwarded. Plugin- and tool-sourced insertions (injected context, subagent settlement reports) are not operator instructions. Text blocks are joined and trimmed; a message with no text block is skipped. The listener leaves with the call, so input arriving after settlement belongs to the parent alone.
+
+The `@deepseek-ai/dsh-tool-workflow/steering` subpath exposes that forwarder for other model-facing workflow consumers.
+
+Each accepted forward appends one `tool-workflow/steering` record carrying only the receiving run's id, so a reader can see that a run took mid-run input without duplicating the message, whose text stays in its own `user/message`. Only a run with an open durable record produces one: nested transport calls write no workflow record at all, and a run whose record was already disabled by an append failure stays disabled. The record exists for the run panel, which names how many of the user's messages the run received; the model reads the same fact from the tool result instead.
 
 The `@deepseek-ai/dsh-tool-workflow/recorder` subpath exposes the shared durable recorder for other model-facing workflow consumers; it preserves the same `tool-workflow/*` event contract. Member start records copy optional provider, model, configured reasoning effort, and `effortSource` (`configured` vs `provider-default`) from the workflow event. Credentials never appear in these fields.
 

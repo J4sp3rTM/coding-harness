@@ -6,6 +6,12 @@
 
 只有标记了 `repetitive` 的简单低风险工作才使用 T3。仅 `simple` + `low` 会落到 T2，而不是 T3。普通或复杂的实现、检查和验证默认使用 T2。T1 仅用于 `exceptional: true` 的单元（架构、困难诊断、例外风险或高价值最终审查）。模型不能自行选择层级。如果一次调用的每个单元都是细小且非重复的 1–2 个文件改动，工具会拒绝该调用，改由父 agent 完成；`refuseTinyNonRepetitive`（默认 true）和 `tinyMaxFiles`（默认 2）可配置该行为。宿主设置命名空间 `development-workflow` 可以为每个层级覆盖 provider、model 和该模型专属的推理等级；省略字段时继承调用方路由，或采用所选模型的提供方默认等级。成员 start 事件会记录该配置或继承的路由，包括推理等级是显式传入还是沿用提供方默认。设置变化作用于下一次调用，正在运行的工作流保留开始时捕获的路由。默认顺序执行；`parallel: true` 要求每个单元声明不重叠的作用域（包括父子路径），但生成文件或其他共享状态仍可能冲突。
 
+## 轮次中途 steering
+
+用户在委派运行期间发送的消息，由共享[转发器](../tool-workflow/README.md#mid-run-steering)转发进运行中的脚本，并在每个剩余单元开始前被取走，因此指导会送达尚未开始的 Worker。每条取走的消息都会作为指导前置到后续 Worker 提示词中，并在与计划冲突时优先于计划。已经在运行的单元不会收到它；在 `parallel: true` 下只有整批开始前的那次取走生效。
+
+结果同时说明两种结局：`steering.applied` 列出送达 Worker 的内容，`steering.unapplied` 列出对任何 Worker 都来得太晚的消息。渲染结果会重复这两份列表，因此父 agent 既不会重新下达已生效的指导，也不会悄悄丢弃迟到的指导。转发只转发、不消费——父 agent 仍会在自己的下一个 step（步骤）边界领取每条消息。
+
 实现 Worker 只能编辑声明的作用域。检查、验证和审查 Worker 明确为只读；验证必须报告准确的相关检查，审查必须报告具体缺陷。Worker 返回 `summary`、`changedFiles`、`validationEvidence`、`risks` 和 `followUps`。报告只是交给父 agent 的证据，不是认证；父 agent 必须检查 diff、运行权威验证、修复问题，并决定是否再次委派。顶层运行和成员通过共享的 `tool-workflow/*` 持久事件记录。
 
 ## 配置
@@ -44,7 +50,7 @@ Use delegate_work only after planning work that needs workers: repetitive mechan
 
 #### 模型看到的内容
 
-模型提交 `objective`、`plan`、`workUnits` 和可选的 `parallel`；共享工作流包络见生成的 [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow)。成功结果包含工作流运行 id、agent 数量和结构化报告。取消和引擎错误会作为错误返回。
+模型提交 `objective`、`plan`、`workUnits` 和可选的 `parallel`；共享工作流包络见生成的 [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow)。成功结果包含工作流运行 id、agent 数量、结构化报告，以及记录轮次中途指导的 `steering.applied` / `steering.unapplied`，渲染文本会重复这两项。取消和引擎错误会作为错误返回。
 
 #### Token 影响
 

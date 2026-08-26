@@ -8,7 +8,7 @@ import type { ChildResult, WorkerInit } from '../src/types.ts'
 
 /** Default limits for in-process sessions (concurrency pinned; auto is machine-derived). */
 function limits(overrides?: Partial<WorkerInit['limits']>): WorkerInit['limits'] {
-  return { maxConcurrentAgents: 8, maxTotalAgents: 1000, maxItemsPerCall: 4096, syncTimeoutMs: 5000, ...overrides }
+  return { maxConcurrentAgents: 8, maxTotalAgents: 1000, maxItemsPerCall: 4096, syncTimeoutMs: 5000, maxSteeringMessages: 16, ...overrides }
 }
 
 /** Wrap a body in the minimal valid meta header (the session receives it pre-extracted). */
@@ -345,6 +345,7 @@ describe('runWorkerSession over an in-process MessageChannel', () => {
       ["return await agent('p', { label: 3 })", '"label" must be a string'],
       ["return await agent('p', { get label() { throw new Error('read failed') } })", 'options must be plain JSON data'],
       ["return await agent('p', { bogus: true })", '"bogus" is not recognized'],
+      ["return await agent('p', { isolation: true })", 'is deferred and not supported'],
       ["return await agent('p', { effort: 3 })", '"effort" must be a string'],
       ["return await agent('p', { schema: { type: 'object', oneOf: [] } })", 'outside the supported subset'],
       ['return await parallel([() => 1, () => 2, () => 3])', 'over the per-call cap (2)'],
@@ -493,6 +494,53 @@ describe('runWorkerSession over an in-process MessageChannel', () => {
     const result = await host.result()
     expect(result.stopReason).toBe('cancelled')
     expect(host.ofType(WorkerToHostType.AgentEnd)[0]!.info.outcome).toBe('cancelled')
+    host.close()
+  })
+
+  it('steering() drains forwarded operator messages in arrival order and leaves the mailbox empty', async () => {
+    const host = fakeHost({ go: false })
+    const session = runWorkerSession(host.port, init(`
+      const first = await steering()
+      const second = await steering()
+      return { first, second }
+    `))
+    await vi.waitFor(() => { expect(host.messages[0]?.type).toBe('ready') })
+    host.send({ type: HostToWorkerType.Steer, text: 'prefer the smaller diff' })
+    host.send({ type: HostToWorkerType.Steer, text: 'skip the rename' })
+    host.send({ type: HostToWorkerType.Go })
+    const result = await host.result()
+    await session
+    expect(result.value).toEqual({ first: ['prefer the smaller diff', 'skip the rename'], second: [] })
+    host.close()
+  })
+
+  it('an undrained mailbox drops its OLDEST message at the bound and narrates the drop', async () => {
+    const host = fakeHost({ go: false })
+    void runWorkerSession(host.port, init('return await steering()', undefined, { maxSteeringMessages: 2 }))
+    await vi.waitFor(() => { expect(host.messages[0]?.type).toBe('ready') })
+    for (const text of ['first', 'second', 'third']) host.send({ type: HostToWorkerType.Steer, text })
+    host.send({ type: HostToWorkerType.Go })
+    const result = await host.result()
+    expect(result.value).toEqual(['second', 'third'])
+    expect(host.ofType(WorkerToHostType.Log).map(m => m.message)).toEqual([
+      'steering mailbox is full (2); dropped the oldest undrained operator message',
+    ])
+    host.close()
+  })
+
+  it('a cancelled run drops later steering, and steering() throws CANCELLED like every other hook', async () => {
+    const host = fakeHost({ manual: true })
+    void runWorkerSession(host.port, init(`
+      try { await agent('pending') } catch (error) { /* cancelled */ }
+      return await steering()
+    `))
+    await vi.waitFor(() => { expect(host.ofType(WorkerToHostType.ChildStart).length).toBe(1) })
+    const callId = host.ofType(WorkerToHostType.ChildStart)[0]!.callId
+    host.send({ type: HostToWorkerType.Cancel, reason: 'user aborted' })
+    host.send({ type: HostToWorkerType.Steer, text: 'too late to matter' })
+    host.send({ type: HostToWorkerType.ChildStartError, callId, rendered: 'workflow run cancelled: user aborted' })
+    const result = await host.result()
+    expect(result.stopReason).toBe('cancelled')
     host.close()
   })
 

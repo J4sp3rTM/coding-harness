@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { CallId, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { CallId, createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
@@ -175,6 +175,108 @@ describe('development workflow over the real loader-composed engine', () => {
       event.type === 'request/header' && event.data.header.config.reasoningEffort === ReasoningEffortId('medium'))
     expect(childHeader?.type === 'request/header' && childHeader.data.header.adapterDefaults).toEqual({ reasoningEffort: true })
     expect(adapter.requests[0]?.reasoningEffort).toBe(ReasoningEffortId('medium'))
+    await parentHandle.dispose()
+  }, 20_000)
+
+  it('reports steering that arrives after every unit started as unapplied', async () => {
+    const ctx = new Context()
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(spawn, { providerName: 'spawn' })
+    await ctx.plugin(WorkerThreadWorkflowEngine, {})
+    await ctx.plugin(developmentWorkflow, { maxWorkUnits: 2 })
+    const adapter = new MockAdapter([
+      toolCallResponse('worker-report', STRUCTURED_OUTPUT_TOOL, report),
+      toolCallResponse('worker-report', STRUCTURED_OUTPUT_TOOL, report),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const parentHandle = await ctx.agents.create({
+      sessionId: SessionId('development-steering-unapplied-parent'),
+      meta: { cwd: process.cwd() },
+      agentOptions: { provider: 'mock', model: 'mock' },
+    })
+    ctx.on('workflow/agent-start', (_info, agent) => {
+      if (agent.seq !== 2) return
+      parentHandle.agent.inject(createUserMessage({
+        content: [{ type: 'text', text: 'after all units started' }],
+        source: { kind: 'user' },
+      }))
+    })
+    const result = await ctx.tools.execute({
+      signal: new AbortController().signal,
+      callId: CallId('development-steering-unapplied'),
+      name: 'delegate_work',
+      arguments: {
+        objective: 'Inspect two files.',
+        plan: 'Inspect both targets and report evidence.',
+        workUnits: [
+          { id: 'inspect-first', role: 'inspection', task: 'Inspect the first entry point.', scopes: ['first'] },
+          { id: 'inspect-second', role: 'inspection', task: 'Inspect the second entry point.', scopes: ['second'] },
+        ],
+      },
+      agent: parentHandle.agent,
+    })
+    expect(result.isError).toBe(false)
+    if (result.isError) throw new Error('expected the delegation to succeed')
+    const value = result.value as { result: { steering: { applied: string[]; unapplied: string[] } } }
+    expect(value.result.steering.applied).toEqual([])
+    expect(value.result.steering.unapplied).toEqual(['after all units started'])
+    await parentHandle.dispose()
+  }, 20_000)
+
+  it('a message the user sends mid-run reaches the units that have not started yet', async () => {
+    const ctx = new Context()
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(spawn, { providerName: 'spawn' })
+    await ctx.plugin(WorkerThreadWorkflowEngine, {})
+    await ctx.plugin(developmentWorkflow, { maxWorkUnits: 2 })
+    const adapter = new MockAdapter([
+      toolCallResponse('worker-report', STRUCTURED_OUTPUT_TOOL, report),
+      toolCallResponse('worker-report', STRUCTURED_OUTPUT_TOOL, report),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const parentHandle = await ctx.agents.create({
+      sessionId: SessionId('development-steering-parent'),
+      meta: { cwd: process.cwd() },
+      agentOptions: { provider: 'mock', model: 'mock' },
+    })
+    // Deliver the message as the first unit starts, through the real inbox the
+    // composer writes to. `inject` rather than `steer` keeps the test on the
+    // forwarding path: this tool call has no open parent turn to wake.
+    ctx.on('workflow/agent-start', (_info, agent) => {
+      if (agent.seq !== 1) return
+      parentHandle.agent.inject(createUserMessage({
+        content: [{ type: 'text', text: 'do not touch the public API' }],
+        source: { kind: 'user' },
+      }))
+    })
+    const result = await ctx.tools.execute({
+      signal: new AbortController().signal,
+      callId: CallId('development-steering'),
+      name: 'delegate_work',
+      arguments: {
+        objective: 'Inspect two files.',
+        plan: 'Inspect both targets and report evidence.',
+        workUnits: [
+          { id: 'inspect-first', role: 'inspection', task: 'Inspect the first entry point.', scopes: ['first'] },
+          { id: 'inspect-second', role: 'inspection', task: 'Inspect the second entry point.', scopes: ['second'] },
+        ],
+      },
+      agent: parentHandle.agent,
+    })
+    expect(result.isError).toBe(false)
+    if (result.isError) throw new Error('expected the delegation to succeed')
+    const value = result.value as { result: { steering: { applied: string[]; unapplied: string[] } } }
+    expect(value.result.steering.applied).toEqual(['do not touch the public API'])
+    expect(value.result.steering.unapplied).toEqual([])
+    // The first unit was already running; only the second carries the guidance.
+    const prompts = adapter.requests.map(request => JSON.stringify(request.messages))
+    expect(prompts[0]).not.toContain('do not touch the public API')
+    expect(prompts[1]).toContain('do not touch the public API')
+    expect(prompts[1]).toContain('it outranks the plan where they conflict')
     await parentHandle.dispose()
   }, 20_000)
 })
