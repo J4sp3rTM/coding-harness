@@ -40,10 +40,10 @@ export interface Config {
    */
   enableRunInBackground?: boolean
   /**
-   * Background execution policy (default `one-shot`). Calls wait for results by
-   * default; `continuable` enables durable background children when explicitly
-   * requested, requires a provider with the `prepareContinuable` capability, and
-   * returns the durable child id. Follow-up adapters remain independently optional.
+   * Background execution policy (default `one-shot`). `one-shot` defaults calls
+   * to foreground; `continuable` defaults them to background, requires a provider
+   * with the `prepareContinuable` capability, and returns the durable child id.
+   * Follow-up adapters remain independently optional.
    */
   backgroundMode?: 'one-shot' | 'continuable'
   /**
@@ -256,7 +256,7 @@ interface DelegationRunSpec {
 /** Resolve the model's optional scheduling request into one execution route. */
 function resolveDelegationRun(
   request: DelegationRunRequest,
-  options: { readonly backgroundEnabled: boolean },
+  options: { readonly backgroundEnabled: boolean; readonly continuable: boolean },
 ): DelegationRunSpec {
   if (!options.backgroundEnabled) {
     // The validator permits undeclared keys, so schema omission also needs
@@ -267,9 +267,10 @@ function resolveDelegationRun(
     return { runInBackground: false }
   }
   return {
-    // Delegations wait by default so the parent can use their results in its next
-    // model step. Independent work can opt into continuation explicitly.
-    runInBackground: request.run_in_background ?? false,
+    // Continuable work is independently scheduled unless the caller explicitly
+    // needs the result before its next action. One-shot policy keeps its foreground
+    // default because its background result requires Task collection.
+    runInBackground: request.run_in_background ?? options.continuable,
   }
 }
 
@@ -370,7 +371,7 @@ export function apply(ctx: Context, config: Config): void {
         // a separately installed capability, so this promise holds whenever the
         // continuable background path is reachable at all.
         ? continuable
-          ? ' This tool waits for the subagent result by default. Set `run_in_background: true` only for independent work; that returns a durable subagent id and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation.'
+          ? ' This tool uses its continuable background route by default and immediately returns a durable subagent id, keeping the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` to use a foreground run only when you must receive its result before taking your next action.'
           : ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
         : ' This call waits for the subagent and returns its result.')
       + (supportsAgentOptions
@@ -401,7 +402,7 @@ export function apply(ctx: Context, config: Config): void {
           run_in_background: {
             type: 'boolean' as const,
             description: continuable
-              ? 'Whether to run independently in the background and return a durable subagent id immediately. Defaults to false; set true only when the parent does not need the result before continuing.'
+              ? 'Whether to use the continuable background route. Defaults to true. Set false to run in the foreground and wait only when your next action depends on its result.'
               : 'Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill.',
           },
         } : {},
@@ -475,7 +476,7 @@ export function apply(ctx: Context, config: Config): void {
           ...maxDepth !== undefined ? { maxDepth } : {},
         }
 
-        const runSpec = resolveDelegationRun(args, { backgroundEnabled })
+        const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
         if (runSpec.runInBackground) {
           if (continuable) {
             // Resolves at inbox acceptance: the child owns its own turns from
@@ -540,8 +541,9 @@ export function apply(ctx: Context, config: Config): void {
   if (present !== undefined) {
     mount(present)
   } else {
-    // A backend fiber may activate later; a misspelled provider remains visible in this log.
-    ctx.logger.info(`subagent provider "${config.provider}" not registered yet; the "${config.toolName ?? 'subagent'}" tool will register when it appears`)
+    // Expected when the provider fiber activates after this tool. A misspelled
+    // provider stays visible at debug; default stderr is the error channel.
+    ctx.logger.debug(`subagent provider "${config.provider}" not registered yet; the "${config.toolName ?? 'subagent'}" tool will register when it appears`)
   }
   if (backgroundEnabled && continuable) {
     // The section follows provider availability without its own manual
@@ -552,7 +554,7 @@ export function apply(ctx: Context, config: Config): void {
       order: SUBAGENT_SECTION_ORDER,
       text: context => disposeTool === undefined || ctx.tools.get(toolName, context.scope) === undefined
         ? ''
-        : `Use ${toolName} in the foreground by default so the parent receives results before continuing. Start independent delegations together in one assistant message; they run concurrently and the parent waits for all results. Set \`run_in_background: true\` only for work whose result is not needed immediately. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`,
+        : `Use ${toolName}'s continuable background route by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when you cannot take your next action without that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`,
     })
   }
 }

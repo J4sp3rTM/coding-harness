@@ -7,7 +7,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { CallId, LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { CallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -204,7 +204,7 @@ describe('dsh-tool-subagent-report', () => {
     expect(adapter.requests.filter(request => request.sessionId === parent.id)).toHaveLength(parentRequests)
   })
 
-  it('queues wakeup reports as one later parent turn', async () => {
+  it('steers wakeup reports as next-step context and wakes the parent', async () => {
     const { ctx, parent, adapter } = await setup({ config: { reportDelivery: 'wakeup' } })
     const { child } = await startChild(ctx, parent)
     const enqueues: string[] = []
@@ -216,7 +216,7 @@ describe('dsh-tool-subagent-report', () => {
 
     const result = await callReport(ctx, child, 'WAKE_UP')
     expect(result.isError).toBe(false)
-    expect(enqueues).toEqual(['queued'])
+    expect(enqueues).toEqual(['steering'])
     await vi.waitFor(() => {
       expect(adapter.requests.some(request => request.sessionId === parent.id)).toBe(true)
     })
@@ -526,10 +526,39 @@ describe('dsh-tool-subagent-report', () => {
     })
 
     expect((await callReport(ctx, child, 'DEFAULT_WAKES')).isError).toBe(false)
-    expect(enqueues).toEqual(['queued'])
+    expect(enqueues).toEqual(['steering'])
     await vi.waitFor(() => {
       expect(adapter.requests.some(request => request.sessionId === parent.id)).toBe(true)
     })
+  })
+
+  it('keeps a wakeup report in next-step while the parent is running', async () => {
+    const { ctx, parent } = await setup({ config: { reportDelivery: 'wakeup' } })
+    const { child } = await startChild(ctx, parent)
+    parent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'busy' }],
+      source: { kind: 'user' },
+    }))
+    await vi.waitFor(() => { expect(parent.status).toBe('running') })
+
+    expect((await callReport(ctx, child, 'WHILE_RUNNING')).isError).toBe(false)
+    expect(parent.inbox.nextTurn).toHaveLength(0)
+    expect(parent.inbox.nextStep.some(message => message.source.kind === 'subagent-report')).toBe(true)
+  })
+
+  it('keeps a wakeup report in next-step while the parent turn is aborting', async () => {
+    const { ctx, parent } = await setup({ config: { reportDelivery: 'wakeup' } })
+    const { child } = await startChild(ctx, parent)
+    parent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'busy' }],
+      source: { kind: 'user' },
+    }))
+    await vi.waitFor(() => { expect(parent.status).toBe('running') })
+    parent.cancel({ kind: 'user' }, { keepInbox: true })
+
+    expect((await callReport(ctx, child, 'DURING_STOP')).isError).toBe(false)
+    expect(parent.inbox.nextTurn).toHaveLength(0)
+    expect(parent.inbox.nextStep.some(message => message.source.kind === 'subagent-report')).toBe(true)
   })
 })
 

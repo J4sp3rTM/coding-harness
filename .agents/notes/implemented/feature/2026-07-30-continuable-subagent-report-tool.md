@@ -40,7 +40,7 @@ The package validates `reportDelivery: 'quiet' | 'wakeup'`; the default is `wake
 
 Quiet delivery calls `parent.inject()`. It adds model-visible context without starting a parent model request: an idle parent appends before the call returns, while an admitting or running parent stages the report for the next safe log position. It creates no inbox occurrence and therefore no synthetic continuation-manager acceptance record.
 
-Waking delivery calls `parent.followup()`. It creates one ordinary FIFO parent turn, wakes a parked parent driver, and never steers an open turn. When that parent is itself a continuable Activation, the send uses the manager's existing admission accounting so the parent cannot settle between synchronous enqueue and the admission microtask.
+Waking delivery steers an idle parent and injects an already-running parent. Both paths add next-step context rather than enqueueing a later-turn prompt ([why not `followup()`](../bug-fix/2026-08-25-subagent-reports-are-next-step-context.md)). Steering wakes a parked parent driver; injection lets an open parent turn claim the report at its next step boundary and avoids `Agent.send()` reclassifying a waking send onto `next-turn` while cancellation drains. When the parent is itself a continuable Activation and is idle, the send uses the manager's existing admission accounting so the parent cannot settle between synchronous enqueue and the admission microtask.
 
 Both modes frame one user-role message as `Background subagent <child-id> reported:` followed by the exact `output`. The durable message source is `{ kind: 'subagent-report', senderSessionId: child.id }`. Normal Agent ordering governs concurrent sends; the subagent layer creates no second queue.
 
@@ -103,7 +103,7 @@ A post-creation revocation check can reject the Activation only after the Agent 
 - A continuable in-process child exposes exactly one scope-local `report` schema only while the report package's contribution is installed; unrelated Agents never expose it.
 - The tool returns the parent message's stable `MessageId`. Quiet delivery has no `InboxItemId`; waking delivery has a separate inbox occurrence.
 - Only the exact resident child may report, and only to the exact live direct parent derived from durable lineage. The service has no recipient parameter or offline fallback.
-- Waking delivery is the validated default: it creates exactly one later FIFO turn and never steers an open turn. Quiet delivery never starts a parent request.
+- Waking delivery is the validated default: it steers next-step context and wakes a parked parent. Quiet delivery never starts a parent request.
 - Child cancellation or disposal after parent acceptance does not retract the report. Before acceptance, child disposal, drain, parent loss, or caller cancellation rejects the operation.
 - Fresh and resumed Activations compose current setup contributions before publication. Grants wait for the next Activation; revocation is immediate for resident children.
 - Unit coverage pins visibility, allow-list behavior, both delivery modes, stable message and sender identities, nested routing, invalid senders, absent parents, cancellation, drain, revocation races, and the absence of Jobs or implicit final reporting.

@@ -40,7 +40,7 @@ root、one-shot child、伪造对象、陈旧 Agent 和同 id 替换对象都以
 
 静默投递调用 `parent.inject()`。它会添加模型可见上下文，但不启动 parent 模型请求：若 parent 空闲，则在调用返回前追加消息；若 parent 正在准入或运行，则暂存报告，留到下一个安全日志位置。该模式不创建 inbox 条目实例，因此也不会产生虚构的继续执行管理器接受记录。
 
-唤醒投递调用 `parent.followup()`。它会创建一个普通的 FIFO parent 轮次，唤醒已停驻的 parent driver，且绝不 steering（中途引导）已开始的轮次。当该 parent 本身也是可继续 Activation 时，发送会使用管理器现有的准入计数，防止 parent 在同步入队与准入微任务之间结算。
+唤醒投递会 steer 空闲 parent，并对已在运行的 parent 使用 inject。两条路径都会添加 next-step 上下文，而不是把后续轮次提示词入队（[为何不用 `followup()`](../bug-fix/2026-08-25-subagent-reports-are-next-step-context.md)）。steer 会唤醒停驻的 parent driver；inject 让已打开的 parent 轮次在下一个 step 边界认领报告，并避免取消收敛期间 `Agent.send()` 将唤醒发送改投到 `next-turn`。当 parent 本身是空闲的可继续 Activation 时，发送会使用管理器现有的准入计数，防止 parent 在同步入队与准入微任务之间结算。
 
 两种模式都会将一条用户角色消息封装为 `Background subagent <child-id> reported:`，后面跟随完全原样的 `output`。持久化消息来源为 `{ kind: 'subagent-report', senderSessionId: child.id }`。并发发送的顺序由 Agent 的常规规则决定；subagent 层不会创建第二条队列。
 
@@ -103,7 +103,7 @@ ACP（Agent Client Protocol）快照 harness 新增 `waitForSubagentTurnEnd`，�
 - 只有安装 report 包贡献时，可继续进程内 child 才会恰好暴露一个作用域局部 `report` schema；无关 Agent 永远不会暴露该 schema。
 - 工具返回 parent 消息的稳定 `MessageId`。静默投递没有 `InboxItemId`；唤醒投递会产生一个单独的 inbox 条目实例。
 - 只有确切的驻留 child 才能报告，且只能报告给根据持久化谱系推导的确切在线直接 parent。服务不接受接收方参数，也不提供离线 fallback。
-- 唤醒投递是校验后的默认模式：它会恰好创建一个后续 FIFO 轮次，绝不 steering 已开始的轮次。静默投递则绝不会启动 parent 请求。
+- 唤醒投递是校验后的默认模式：它会 steer next-step 上下文并唤醒停驻的 parent。静默投递则绝不会启动 parent 请求。
 - parent 接受后取消或 dispose child 不会撤回报告。接受前，child dispose、drain、parent 丢失或调用方取消都会拒绝操作。
 - 新建和恢复的 Activation 都会在发布前组合当前设置贡献。新授权等待下一个 Activation 才生效，而已驻留 child 的授权撤销立即生效。
 - 单元覆盖固定可见性、allow-list 行为、两种投递模式、稳定的消息与发送方身份、嵌套路由、无效发送方、缺失的 parent、取消、drain、撤销竞争，以及不存在 Task 或隐式最终报告。
