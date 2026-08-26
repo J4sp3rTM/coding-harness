@@ -34,7 +34,7 @@ describe('tails', () => {
       />,
     )
     expect(view.getByText('Think')).toBeTruthy()
-    expect(view.getByText('thinking hard')).toBeTruthy()
+    expect(view.getByText('thinking hard second line')).toBeTruthy()
     expect(view.getByText(/Unknown content block/)).toBeTruthy()
     const stopped = render(
       <AssistantMarkdown t={t} blocks={[{ kind: 'text', text: 'partial words' }]} streaming={false} interrupted />,

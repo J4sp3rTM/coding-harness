@@ -39,7 +39,7 @@ afterEach(() => {
 const t = makeTranslate(en, commonEn)
 
 describe('ReasoningRow', () => {
-  it('follows the latest streaming line, scrolls to its end, then restores the settled first line', () => {
+  it('follows normalized streaming reasoning, scrolls to its end, then resets when settled', () => {
     const view = render(
       <AssistantMarkdown
         t={t}
@@ -48,7 +48,7 @@ describe('ReasoningRow', () => {
       />,
     )
     expect(view.getByText('Running')).toBeTruthy()
-    const summary = view.getByText('Newest reasoning tokens')
+    const summary = view.getByText('Inspect the session Newest reasoning tokens')
     Object.defineProperties(summary, {
       scrollWidth: { configurable: true, value: 300 },
       clientWidth: { configurable: true, value: 100 },
@@ -76,7 +76,7 @@ describe('ReasoningRow', () => {
       />,
     )
     flushAnimationFrames(3)
-    expect(view.getByText('Inspect the session')).toBeTruthy()
+    expect(summary.textContent).toBe('Inspect the session Newest reasoning tokens keep arriving')
     expect(view.queryByText('Running')).toBeNull()
     expect(summary.scrollLeft).toBe(0)
     expect(summary.hasAttribute('data-follow-end')).toBe(false)
@@ -92,7 +92,7 @@ describe('ReasoningRow', () => {
     )
     const row = view.getByRole('button')
 
-    fireEvent.click(view.getByText('Inspect the session'))
+    fireEvent.click(view.getByText('Inspect the session Check persistence'))
     expect(row.getAttribute('aria-expanded')).toBe('true')
     expect(view.getByText(/Check persistence/)).toBeTruthy()
 
@@ -113,5 +113,18 @@ describe('ReasoningRow', () => {
     expect(view.queryByText('IN')).toBeNull()
     expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
     expect(view.container.querySelector('[class*="thinkBody"]')).not.toBeNull()
+  })
+
+  it('collapses provider-authored line breaks in expanded reasoning', () => {
+    const view = render(
+      <AssistantMarkdown
+        t={t}
+        blocks={[{ kind: 'reasoning', text: 'per-cell\n\n\nmedian\nover tasks\n\nwhere BOTH\nharness' }]}
+        streaming={false}
+      />,
+    )
+    fireEvent.click(view.getByText('Think'))
+    const body = view.container.querySelector('[class*="thinkBody"]')
+    expect(body?.textContent).toBe('per-cell median over tasks where BOTH harness')
   })
 })
