@@ -107,6 +107,13 @@ export interface DeepSeekSearchProviderOptions {
    * prevents dispatch so model-visible auxiliary input cannot escape logging.
    */
   recordRequest?: (request: DeepSeekSearchLlmRequest) => void
+  /**
+   * Synchronous credential-presence snapshot used by the web seam's ordered
+   * provider selection. Omit only for callers whose resolver's presence is the
+   * best available usability signal; the plugin supplies an explicit snapshot
+   * backed by the credentials seam.
+   */
+  isApiKeyConfigured?: () => boolean
 }
 
 /**
@@ -188,7 +195,9 @@ export class DeepSeekSearchProvider implements WebSearchProvider {
 
   available(): boolean {
     const options = this.resolveOptions()
-    return ((options.apiKey?.length ?? 0) > 0 || options.resolveApiKey !== undefined)
+    const credentialAvailable = options.isApiKeyConfigured?.()
+      ?? ((options.apiKey?.length ?? 0) > 0 || options.resolveApiKey !== undefined)
+    return credentialAvailable
       && URL.canParse(options.baseURL)
       && isPositiveInteger(options.maxTokens)
       && isPositiveInteger(options.maxUses)

@@ -2,7 +2,7 @@
 
 English | [中文](web.zh.md)
 
-The web access seam — a capability seam that spans **two operations** (search and fetch) on one `ctx.web` service, split across packages: Service Definition ([dsh-web](../../packages/web/web), `ctx.web` + the provider registries), Service Providers ([dsh-web-search-exa](../../packages/web/web-search-exa), [dsh-web-search-perplexity](../../packages/web/web-search-perplexity), [dsh-web-search-deepseek](../../packages/web/web-search-deepseek), [dsh-web-fetch-http](../../packages/web/web-fetch-http)), and Consumer ([dsh-tool-web](../../packages/web/tool-web), the `web_search`/`web_fetch` tool schemas). Web is **one optional capability**, not part of the agent-loop spine — so its vocabulary lives here, not in [core.md](core.md). A search-provider swap does not change how the model asks for a query, and a fetch-provider swap does not change how the model asks for a URL.
+The web access seam — a capability seam that spans **two operations** (search and fetch) on one `ctx.web` service, split across packages: Service Definition ([dsh-web](../../packages/web/web), `ctx.web` + the provider registries), Service Providers ([dsh-web-search-exa](../../packages/web/web-search-exa), [dsh-web-search-perplexity](../../packages/web/web-search-perplexity), [dsh-web-search-deepseek](../../packages/web/web-search-deepseek), [dsh-web-search-duckduckgo](../../packages/web/web-search-duckduckgo), [dsh-web-fetch-http](../../packages/web/web-fetch-http)), and Consumer ([dsh-tool-web](../../packages/web/tool-web), the `web_search`/`web_fetch` tool schemas). Web is **one optional capability**, not part of the agent-loop spine — so its vocabulary lives here, not in [core.md](core.md). A search-provider swap does not change how the model asks for a query, and a fetch-provider swap does not change how the model asks for a URL.
 
 Source: [`packages/web/web/src/types.ts`](../../packages/web/web/src/types.ts)
 
@@ -121,7 +121,7 @@ type WebFetchBody =
 
 A provider's `available(): boolean` is a cheap LOCAL check (credential presence, parseable config) and **must not make network calls**. It is an input to execution-time selection, not a health system: `search()`/`fetch()` read it to pick a usable provider, and a selection failure surfaces as the structured `WebError` the caller routes on — which carries the branchable detail (the missing id or ambiguous candidate set) in its code and message.
 
-Selection never depends on registration, config, or HMR order: a capability has an explicit provider id (config `searchProvider`/`fetchProvider`, or the matching env var feeding the same field), or auto-selects when exactly one usable provider is registered; multiple usable providers with no configured id is `WEB_PROVIDER_AMBIGUOUS`, not first-wins.
+A pin (`searchProvider`/`fetchProvider`, or the matching env var feeding the same field) wins outright and never falls back. An ordered list (`searchProviders`/`fetchProviders`) applies only without a pin: the first registered and usable listed id wins, a registered-but-unavailable listed id is skipped, and a listed-but-never-registered id is `WEB_PROVIDER_CONFIGURED_MISSING`. Auto-selection applies only when neither is configured; multiple usable providers with neither a pin nor a list is `WEB_PROVIDER_AMBIGUOUS`, not first-wins.
 
 ## Errors
 
@@ -129,7 +129,7 @@ Selection never depends on registration, config, or HMR order: a capability has 
 
 ## The service
 
-`WebRuntime` registers search and fetch providers, rejects duplicate ids with `WEB_DUPLICATE_PROVIDER`, and resolves providers at execution time with structured selection errors. The local fetch backend accepts only HTTP(S), rejects credentials, caps redirects, bytes, characters, and time, revalidates every same-origin redirect hop, and decodes the body; the tool owns presentation. The local backend does not block private-network targets; do not enable `web_fetch` where it can reach sensitive internal ones.
+`WebRuntime` registers search and fetch providers, rejects duplicate ids with `WEB_DUPLICATE_PROVIDER`, and resolves providers at execution time with structured selection errors. The local fetch backend accepts only HTTP(S), rejects credentials, blocks private-network hostnames and addresses before connecting, caps redirects, bytes, characters, and time, revalidates every same-origin redirect hop, and decodes the body; the tool owns presentation. DNS rebinding between the pre-connect check and the transport connect remains a documented limitation of that provider.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -145,14 +145,15 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 The web access service. Registered as `ctx.web` (one instance per context).
 
-Selection semantics (resolved at execution time, never order-dependent):
+Selection semantics (resolved at execution time):
 
-- A configured id that is registered and `available()` → that provider.
-- A configured id not registered → `WEB_PROVIDER_CONFIGURED_MISSING`.
-- A configured id registered but unavailable → `WEB_PROVIDER_CONFIGURED_UNAVAILABLE`.
-- No id configured, exactly one registered usable provider → that provider.
-- No id configured, multiple usable providers → `WEB_PROVIDER_AMBIGUOUS`.
-- No id configured, no usable provider → `WEB_PROVIDER_UNAVAILABLE`.
+- A pinned id (`searchProvider`/`fetchProvider`) that is registered and `available()` → that provider.
+- A pinned id not registered → `WEB_PROVIDER_CONFIGURED_MISSING`.
+- A pinned id registered but unavailable → `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` (a pin never falls back).
+- No pin, a non-empty preference list → walk it in order: first registered and usable entry wins, unusable entries are skipped, any unregistered entry throws `WEB_PROVIDER_CONFIGURED_MISSING` (validated before the walk), and an exhausted list throws `WEB_PROVIDER_UNAVAILABLE`.
+- Neither pin nor list, exactly one registered usable provider → that provider (never order-dependent).
+- Neither pin nor list, multiple usable providers → `WEB_PROVIDER_AMBIGUOUS`.
+- Neither pin nor list, no usable provider → `WEB_PROVIDER_UNAVAILABLE`.
 
 ```ts cordis-catalog
 /**
@@ -195,5 +196,5 @@ async search(request: WebSearchRequest, signal?: AbortSignal): Promise<WebSearch
 async fetch(request: WebFetchRequest, signal?: AbortSignal): Promise<WebFetchResult>
 ```
 
-Source: [`packages/web/web/src/index.ts:74`](../../packages/web/web/src/index.ts)
+Source: [`packages/web/web/src/index.ts:101`](../../packages/web/web/src/index.ts)
 <!-- END GENERATED cordis-surface -->

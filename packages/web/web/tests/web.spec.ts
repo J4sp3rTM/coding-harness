@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import WebRuntime, {
   WebError,
@@ -93,9 +93,10 @@ describe('WebRuntime execution resolution', () => {
     await expect(web.search({ query: 'q' })).rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_MISSING' }))
   })
 
-  it('throws WEB_PROVIDER_CONFIGURED_UNAVAILABLE for an unusable configured id', async () => {
-    const { web } = await mountWeb({ searchProvider: 'exa' })
+  it('throws WEB_PROVIDER_CONFIGURED_UNAVAILABLE for an unusable configured id instead of falling back', async () => {
+    const { web } = await mountWeb({ searchProvider: 'exa', searchProviders: ['perplexity'] })
     web.registerSearchProvider(makeSearchProvider('exa', unavailable, () => Promise.resolve(searchResult('exa'))))
+    web.registerSearchProvider(makeSearchProvider('perplexity', available, () => Promise.resolve(searchResult('perplexity'))))
     await expect(web.search({ query: 'q' })).rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_UNAVAILABLE' }))
   })
 
@@ -203,6 +204,115 @@ describe('WebRuntime fetch capability', () => {
     await expect(web.fetch({ url: 'https://example.com' })).rejects.toThrow(
       expect.objectContaining({ code: 'WEB_PROVIDER_UNAVAILABLE' }),
     )
+  })
+
+  it('throws WEB_PROVIDER_CONFIGURED_UNAVAILABLE for an unusable fetch pin instead of falling back', async () => {
+    const { web } = await mountWeb({ fetchProvider: 'slow', fetchProviders: ['http'] })
+    web.registerFetchProvider(makeFetchProvider('slow', unavailable, fetchResult('slow')))
+    web.registerFetchProvider(makeFetchProvider('http', available, fetchResult('http')))
+    await expect(web.fetch({ url: 'https://example.com' })).rejects.toThrow(
+      expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_UNAVAILABLE' }),
+    )
+  })
+
+  it('treats $DSH_WEB_FETCH_PROVIDER as an unavailable pin instead of falling back', async () => {
+    vi.stubEnv('DSH_WEB_FETCH_PROVIDER', 'slow')
+    const { web } = await mountWeb({ fetchProviders: ['http'] })
+    web.registerFetchProvider(makeFetchProvider('slow', unavailable, fetchResult('slow')))
+    web.registerFetchProvider(makeFetchProvider('http', available, fetchResult('http')))
+    await expect(web.fetch({ url: 'https://example.com' })).rejects.toThrow(
+      expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_UNAVAILABLE' }),
+    )
+  })
+})
+
+describe('WebRuntime preference-list resolution', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('walks the list in order: the first listed usable provider wins', async () => {
+    const { web } = await mountWeb({ searchProviders: ['exa', 'perplexity'] })
+    web.registerSearchProvider(makeSearchProvider('exa', available, () => Promise.resolve(searchResult('exa'))))
+    web.registerSearchProvider(makeSearchProvider('perplexity', available, () => Promise.resolve(searchResult('perplexity'))))
+    await expect(web.search({ query: 'q' })).resolves.toMatchObject({ content: 'exa' })
+
+    const reversed = await mountWeb({ searchProviders: ['perplexity', 'exa'] })
+    reversed.web.registerSearchProvider(makeSearchProvider('exa', available, () => Promise.resolve(searchResult('exa'))))
+    reversed.web.registerSearchProvider(makeSearchProvider('perplexity', available, () => Promise.resolve(searchResult('perplexity'))))
+    await expect(reversed.web.search({ query: 'q' })).resolves.toMatchObject({ content: 'perplexity' })
+  })
+
+  it('skips a listed provider that is registered but unavailable (the fallback)', async () => {
+    const { web } = await mountWeb({ searchProviders: ['deepseek-official', 'duckduckgo'] })
+    web.registerSearchProvider(makeSearchProvider('deepseek-official', unavailable, () => Promise.resolve(searchResult('deepseek-official'))))
+    web.registerSearchProvider(makeSearchProvider('duckduckgo', available, () => Promise.resolve(searchResult('duckduckgo'))))
+    await expect(web.search({ query: 'q' })).resolves.toMatchObject({ content: 'duckduckgo' })
+  })
+
+  it('fails WEB_PROVIDER_CONFIGURED_MISSING for a never-registered id in any position', async () => {
+    const first = await mountWeb({ searchProviders: ['missing', 'exa'] })
+    first.web.registerSearchProvider(makeSearchProvider('exa', available, () => Promise.resolve(searchResult('exa'))))
+    await expect(first.web.search({ query: 'q' })).rejects.toThrow(
+      expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_MISSING' }),
+    )
+
+    const last = await mountWeb({ searchProviders: ['exa', 'missing'] })
+    last.web.registerSearchProvider(makeSearchProvider('exa', available, () => Promise.resolve(searchResult('exa'))))
+    await expect(last.web.search({ query: 'q' })).rejects.toThrow(
+      expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_MISSING' }),
+    )
+  })
+
+  it('fails WEB_PROVIDER_UNAVAILABLE when every listed provider is registered but unavailable', async () => {
+    const { web } = await mountWeb({ searchProviders: ['exa', 'perplexity'] })
+    web.registerSearchProvider(makeSearchProvider('exa', unavailable, () => Promise.resolve(searchResult('exa'))))
+    web.registerSearchProvider(makeSearchProvider('perplexity', unavailable, () => Promise.resolve(searchResult('perplexity'))))
+    await expect(web.search({ query: 'q' })).rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_UNAVAILABLE' }))
+  })
+
+  it('lets a pinned id win over the list without validating the ignored list', async () => {
+    const { web } = await mountWeb({ searchProvider: 'exa', searchProviders: ['missing'] })
+    web.registerSearchProvider(makeSearchProvider('exa', available, () => Promise.resolve(searchResult('exa'))))
+    await expect(web.search({ query: 'q' })).resolves.toMatchObject({ content: 'exa' })
+  })
+
+  it('treats $DSH_WEB_SEARCH_PROVIDER as an unavailable pin instead of falling back', async () => {
+    vi.stubEnv('DSH_WEB_SEARCH_PROVIDER', 'perplexity')
+    const { web } = await mountWeb({ searchProviders: ['exa'] })
+    web.registerSearchProvider(makeSearchProvider('exa', available, () => Promise.resolve(searchResult('exa'))))
+    web.registerSearchProvider(makeSearchProvider('perplexity', unavailable, () => Promise.resolve(searchResult('perplexity'))))
+    await expect(web.search({ query: 'q' })).rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_UNAVAILABLE' }))
+  })
+
+  it('treats $DSH_WEB_SEARCH_PROVIDER as a usable pin over the configured list', async () => {
+    vi.stubEnv('DSH_WEB_SEARCH_PROVIDER', 'perplexity')
+    const { web } = await mountWeb({ searchProviders: ['exa'] })
+    web.registerSearchProvider(makeSearchProvider('exa', available, () => Promise.resolve(searchResult('exa'))))
+    web.registerSearchProvider(makeSearchProvider('perplexity', available, () => Promise.resolve(searchResult('perplexity'))))
+    await expect(web.search({ query: 'q' })).resolves.toMatchObject({ content: 'perplexity' })
+  })
+
+  it('still auto-selects when neither pin nor list is configured', async () => {
+    const { web } = await mountWeb()
+    web.registerSearchProvider(makeSearchProvider('exa', unavailable, () => Promise.resolve(searchResult('exa'))))
+    web.registerSearchProvider(makeSearchProvider('duckduckgo', available, () => Promise.resolve(searchResult('duckduckgo'))))
+    await expect(web.search({ query: 'q' })).resolves.toMatchObject({ content: 'duckduckgo' })
+  })
+
+  it('treats an empty list as no preference and auto-selects', async () => {
+    // The schema layer resolves an omitted array field to [], so an explicitly
+    // empty list is indistinguishable from an absent one.
+    const { web } = await mountWeb({ searchProviders: [] })
+    web.registerSearchProvider(makeSearchProvider('exa', available, () => Promise.resolve(searchResult('exa'))))
+    await expect(web.search({ query: 'q' })).resolves.toMatchObject({ content: 'exa' })
+  })
+
+  it('mirrors the ordered fallback for fetch providers', async () => {
+    const { web } = await mountWeb({ fetchProviders: ['slow', 'http'] })
+    web.registerFetchProvider(makeFetchProvider('slow', unavailable, fetchResult('slow')))
+    web.registerFetchProvider(makeFetchProvider('http', available, fetchResult('http')))
+    await expect(web.fetch({ url: 'https://example.com' })).resolves.toMatchObject({ body: { content: 'http' } })
   })
 })
 

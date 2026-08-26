@@ -4,10 +4,14 @@ import { AddressInfo } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import { HttpFetchProvider, LOCAL_FETCH_PROVIDER_ID } from '@deepseek-ai/dsh-web-fetch-http'
-import type { HttpFetchLimits } from '@deepseek-ai/dsh-web-fetch-http'
+import type { HttpFetchLimits, ResolveAddresses } from '@deepseek-ai/dsh-web-fetch-http'
 import * as fetchPlugin from '@deepseek-ai/dsh-web-fetch-http'
 import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from '../src/policy.ts'
+import { assertAddressAllowed, assertPublicHostname, parseIPv6 } from '../src/ssrf.ts'
 
+// The transport fixtures below all serve on loopback, so this shared policy
+// waives exactly that class; the guard's enforcing behavior has its own
+// describe further down, which never opts in.
 const limits: HttpFetchLimits = {
   maxUrlLength: 2048,
   maxResponseBytes: 5_000_000,
@@ -15,6 +19,7 @@ const limits: HttpFetchLimits = {
   timeoutMs: 5_000,
   maxRedirects: 5,
   userAgent: 'test-agent/1.0',
+  allowLoopback: true,
 }
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void
@@ -305,6 +310,13 @@ describe('HttpFetchProvider invalid URLs and abort', () => {
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_FETCH_TIMEOUT' }))
   })
 
+  it('times out a DNS lookup that never settles with WEB_FETCH_TIMEOUT', async () => {
+    const neverResolves: ResolveAddresses = () => new Promise(() => {})
+    await expect(new HttpFetchProvider({ ...limits, timeoutMs: 50, allowLoopback: false }, neverResolves)
+      .fetch({ url: 'http://slow-resolution.test/' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_FETCH_TIMEOUT' }))
+  })
+
   it('classifies a timeout DURING the body read as WEB_FETCH_TIMEOUT, not WEB_ABORTED', async () => {
     // Promise body that resolves headers (so fetch() returns) but a content-length
     // that outlasts the bytes sent, so readCapped()'s reader awaits more and the
@@ -371,7 +383,7 @@ describe('web-fetch-http plugin registration', () => {
   it('registers the provider into ctx.web (HMR-safe)', async () => {
     const ctx = new Context()
     await ctx.plugin(WebRuntime, { fetchProvider: LOCAL_FETCH_PROVIDER_ID })
-    const fiber = await ctx.plugin(fetchPlugin, {})
+    const fiber = await ctx.plugin(fetchPlugin, { allowLoopback: true })
     await expect(ctx.web.fetch({ url: `${base}/` }))
       .resolves.toMatchObject({ statusCode: 200 })
     await fiber.dispose()
@@ -421,9 +433,170 @@ describe('web-fetch-http plugin registration', () => {
   it('accepts maxRedirects: 0 (follow no redirects) as valid config', async () => {
     const ctx = new Context()
     await ctx.plugin(WebRuntime, { fetchProvider: LOCAL_FETCH_PROVIDER_ID })
-    const fiber = await ctx.plugin(fetchPlugin, { maxRedirects: 0 })
+    const fiber = await ctx.plugin(fetchPlugin, { maxRedirects: 0, allowLoopback: true })
     await expect(ctx.web.fetch({ url: `${base}/` }))
       .resolves.toMatchObject({ statusCode: 200 })
     await fiber.dispose()
+  })
+
+  it('defaults allowLoopback to false (the guard enforces)', async () => {
+    expect(fetchPlugin.Config({})).toMatchObject({ allowLoopback: false })
+  })
+})
+
+describe('private-network guard (default enforcing)', () => {
+  /** Requests the loopback fixture actually received. */
+  let received: number
+
+  beforeEach(async () => {
+    handler = (_req, res) => {
+      received++
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end('internal')
+    }
+    server = createServer((req, res) => { handler(req, res) })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    base = `http://127.0.0.1:${port}`
+    received = 0
+  })
+
+  /** A provider with the default enforcing policy and an injected resolver. */
+  function enforcing(resolveAddresses?: ResolveAddresses): HttpFetchProvider {
+    return new HttpFetchProvider({ ...limits, allowLoopback: false }, resolveAddresses)
+  }
+
+  it('blocks a loopback IP-literal target before connecting', async () => {
+    await expect(enforcing().fetch({ url: base }))
+      .rejects.toMatchObject({ code: 'WEB_BLOCKED_URL', message: expect.stringMatching(/loopback/) as string })
+    expect(received).toBe(0)
+  })
+
+  it('resolves localhost through DNS and blocks the loopback answer', async () => {
+    // The default node:dns resolution path runs for real here; `localhost`
+    // answers from the host table without a network.
+    const port = new URL(base).port
+    await expect(new HttpFetchProvider({ ...limits, allowLoopback: false }).fetch({ url: `http://localhost:${port}/` }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    expect(received).toBe(0)
+  })
+
+  it.each([
+    ['http://sub.localhost/', 'loopback subdomain'],
+    ['http://service.local/', '.local name'],
+  ])('blocks %s (%s) without any DNS cost', async (url) => {
+    await expect(enforcing().fetch({ url })).rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+  })
+
+  it('blocks an IPv6 loopback literal before connecting', async () => {
+    await expect(enforcing().fetch({ url: 'http://[::1]:1/' }))
+      .rejects.toMatchObject({ code: 'WEB_BLOCKED_URL', message: expect.stringMatching(/::1/) as string })
+  })
+
+  it('refuses a hostname that resolves to a private address and never connects', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    await expect(enforcing(async () => ['93.184.216.34', '10.0.0.9']).fetch({ url: 'http://mixed.test/' }))
+      .rejects.toMatchObject({ code: 'WEB_BLOCKED_URL', message: expect.stringMatching(/10\.0\.0\.9/) as string })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('keeps enforcing private ranges even when loopback is waived', async () => {
+    await expect(enforcing(async () => ['172.16.0.5']).fetch({ url: 'http://intranet.test/' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+  })
+
+  it('reports an unresolvable host as WEB_PROVIDER_ERROR', async () => {
+    await expect(enforcing(async () => []).fetch({ url: 'http://nowhere.test/' }))
+      .rejects.toMatchObject({ code: 'WEB_PROVIDER_ERROR', message: expect.stringMatching(/cannot resolve/) as string })
+    await expect(enforcing(async () => {
+      throw new Error('NXDOMAIN')
+    }).fetch({ url: 'http://nowhere.test/' }))
+      .rejects.toMatchObject({ code: 'WEB_PROVIDER_ERROR', message: expect.stringMatching(/cannot resolve/) as string })
+  })
+
+  it('connects when every resolved address is public', async () => {
+    const fetchSpy = vi.fn(async () => new Response('public body', { status: 200, headers: { 'content-type': 'text/plain' } }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const result = await enforcing(async () => ['93.184.216.34']).fetch({ url: 'http://example.test/page' })
+    expect(result.body).toEqual({ kind: 'text', content: 'public body' })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-checks the resolved address after a redirect hop and refuses a rebound target', async () => {
+    // First hop resolves public and is allowed; the same-origin redirect keeps
+    // the hostname but the resolver now answers private — the guard must
+    // refuse BEFORE the second connection.
+    let calls = 0
+    const responses = [
+      new Response(null, { status: 302, headers: { location: '/step2' } }),
+      new Response('should never be read', { status: 200, headers: { 'content-type': 'text/plain' } }),
+    ]
+    const fetchSpy = vi.fn(async () => responses[Math.min(calls++, responses.length - 1)]!)
+    vi.stubGlobal('fetch', fetchSpy)
+    let lookupCalls = 0
+    const provider = new HttpFetchProvider(
+      { ...limits, allowLoopback: false },
+      async () => ++lookupCalls === 1 ? ['93.184.216.34'] : ['192.168.0.20'],
+    )
+    await expect(provider.fetch({ url: 'http://rebind.test/' }))
+      .rejects.toMatchObject({ code: 'WEB_BLOCKED_URL', message: expect.stringMatching(/192\.168\.0\.20/) as string })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(lookupCalls).toBe(2)
+  })
+})
+
+describe('ssrf literal classification', () => {
+  it.each([
+    '0.0.0.0',
+    '10.0.0.1',
+    '172.16.0.1',
+    '172.31.255.254',
+    '192.168.1.1',
+    '169.254.169.254',
+  ])('blocks IPv4 private-network answer %s', (address) => {
+    expect(() => { assertAddressAllowed(address, false) }).toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+  })
+
+  it('waives loopback hostnames and IPv4 loopback addresses only when enabled', () => {
+    expect(() => { assertPublicHostname(new URL('http://localhost/'), true) }).not.toThrow()
+    expect(() => { assertAddressAllowed('127.0.0.1', true) }).not.toThrow()
+  })
+
+  it('rejects malformed address values without treating them as private ranges', () => {
+    expect(() => { assertAddressAllowed('not-an-address', false) }).not.toThrow()
+  })
+
+  it.each(['FE80::1', 'FEBF::1', 'FC00::1', 'FD12::1'])('blocks IPv6 private-network answer %s', (address) => {
+    expect(() => { assertAddressAllowed(address, false) }).toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+  })
+
+  it('classifies unspecified, mapped, and public IPv6 addresses', () => {
+    expect(() => { assertAddressAllowed('::', false) }).toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    expect(() => { assertAddressAllowed('::ffff:10.0.0.1', false) }).toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    expect(() => { assertAddressAllowed('2606:4700::1', false) }).not.toThrow()
+  })
+
+  it('waives only IPv6 loopback, not unique-local or link-local addresses', () => {
+    expect(() => { assertAddressAllowed('::1', true) }).not.toThrow()
+    expect(() => { assertAddressAllowed('FC00::1', true) }).toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    expect(() => { assertAddressAllowed('FE80::1', true) }).toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    expect(() => { assertAddressAllowed('FE00::1', true) }).not.toThrow()
+  })
+
+  it('parses IPv6 forms including the embedded-IPv4 tail', () => {
+    expect(parseIPv6('::1')).toEqual([0, 0, 0, 0, 0, 0, 0, 1])
+    expect(parseIPv6('fe80::1')).toEqual([0xfe80, 0, 0, 0, 0, 0, 0, 1])
+    expect(parseIPv6('::ffff:127.0.0.1')).toEqual([0, 0, 0, 0, 0, 0xffff, 0x7f00, 1])
+    expect(parseIPv6('2606:4700::6810:85e5')).toEqual([0x2606, 0x4700, 0, 0, 0, 0, 0x6810, 0x85e5])
+    expect(parseIPv6('1:2:3:4:5:6:7:8')).toHaveLength(8)
+    expect(parseIPv6('example.com')).toBeUndefined()
+    expect(parseIPv6('::zz')).toBeUndefined()
+    expect(parseIPv6('1:2:3:4:5:6:7:8:9')).toBeUndefined()
+    expect(parseIPv6('1:2:3:4:5:6:7')).toBeUndefined()
+    expect(parseIPv6('1::2::3')).toBeUndefined()
+    expect(parseIPv6('1:2:3:4:5:6:7:8::')).toBeUndefined()
+    expect(parseIPv6('fe80::1%en0')).toEqual([0xfe80, 0, 0, 0, 0, 0, 0, 1])
+    expect(parseIPv6('12345::')).toBeUndefined()
   })
 })

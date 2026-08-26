@@ -532,6 +532,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'deepseekAccount',
+    summary: 'Account-balance lookups for the routes this plugin serves, published for optional consumers such as `/usage`.',
+    description: 'Account-balance lookups for the routes this plugin serves, published for optional consumers such as `/usage`.',
+    methods: [
+      {
+        signature: 'remainingUsd(provider: string, signal?: AbortSignal): Promise<number | undefined>',
+        description: 'Resolve one route\'s remaining prepaid balance in USD.',
+        parameters: [{ name: 'provider', description: 'registered provider route to ask about; routes this plugin does not serve answer `undefined`.' }, { name: 'signal', description: 'cancellation for the underlying request.' }],
+        returns: 'the remaining USD amount, or `undefined` when the route is not served here or the balance cannot be resolved.',
+      },
+    ],
+  },
+  {
     key: 'directoryPicker',
     summary: 'Abstract directory-picking service.',
     description: 'Abstract directory-picking service. Subclass, implement `capability()`, and load the subclass as a plugin — it registers as `ctx.directoryPicker` (one implementation per context; loading a second throws, cordis\' standard duplicate-service behavior). The capability object must be stable for the service lifetime: consumers may capture it across calls.',
@@ -1024,6 +1037,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Select whether plan mode should be active. Between turns the method appends the change immediately because no in-turn pre-step will run until another prompt starts a turn. The open-turn fold is the idle signal: agent status stays `running` through post-turn checkpointing, when no further in-turn pre-step runs. During an open turn the selection remains pending until the next accepted in-turn pre-step. Repeated selection of the current or already-pending state is a no-op.',
         parameters: [{ name: 'agent', description: 'The agent to switch.' }, { name: 'active', description: 'Whether plan mode should be active.' }],
         returns: 'what happened: `committed` (logged now), `queued` (awaiting the next accepted in-turn pre-step), `cancelled` (an opposite pending selection was cleared; the logged state already matches), or `noop` (already in that state).',
+      },
+    ],
+  },
+  {
+    key: 'providerStatus',
+    summary: 'Host-process store of the last status observation per route.',
+    description: 'Host-process store of the last status observation per route. One record per route at a time: each publication replaces the previous one, so `lookup` always answers with the freshest observation regardless of which configuration produced it. Records are frozen detached copies.',
+    methods: [
+      {
+        signature: 'recordSnapshot(publication: ProviderStatusPublication & { /** Fully parsed dimensions; each named once. */ dimensions?: readonly ProviderQuotaDimensionSnapshot[] /** Subscription allowance windows; each labeled once. */ windows?: readonly ProviderPlanWindowSnapshot[] }): void',
+        description: 'Commit one quota snapshot as the latest observation for its route. Dimensions and plan windows are validated before anything is stored; a rejected publication leaves the previously stored record serving.',
+        parameters: [{ name: 'publication', description: 'the route, optional non-secret credential identity, and parsed quota measurements.' }],
+        throws: ['when any field is outside its documented domain.'],
+      },
+      {
+        signature: 'recordUnavailable(publication: ProviderStatusPublication & { /** Why no usable dimensions could be parsed; never quotes credential material. */ reason: string }): void',
+        description: 'Commit an explicit unavailable state as the latest observation for its route. Use this when a response carried recognized status fields whose values were all unusable; a response with no recognizable fields is simply not published.',
+        parameters: [{ name: 'publication', description: 'the route, optional non-secret credential identity, and why nothing usable was parsed.' }],
+        throws: ['when any field is outside its documented domain.'],
+      },
+      {
+        signature: 'lookup(routeId: string): ProviderStatusRecord | undefined',
+        description: 'Read the latest observation for one route.',
+        parameters: [{ name: 'routeId', description: 'harness provider route to look up.' }],
+        returns: 'the frozen latest record, or `undefined` before the first publication.',
       },
     ],
   },
@@ -2090,7 +2128,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
     key: 'web',
     summary: 'The web access service.',
-    description: 'The web access service. Registered as `ctx.web` (one instance per context).\n\nSelection semantics (resolved at execution time, never order-dependent):\n\n- A configured id that is registered and `available()` → that provider.\n- A configured id not registered → `WEB_PROVIDER_CONFIGURED_MISSING`.\n- A configured id registered but unavailable → `WEB_PROVIDER_CONFIGURED_UNAVAILABLE`.\n- No id configured, exactly one registered usable provider → that provider.\n- No id configured, multiple usable providers → `WEB_PROVIDER_AMBIGUOUS`.\n- No id configured, no usable provider → `WEB_PROVIDER_UNAVAILABLE`.',
+    description: 'The web access service. Registered as `ctx.web` (one instance per context).\n\nSelection semantics (resolved at execution time):\n\n- A pinned id (`searchProvider`/`fetchProvider`) that is registered and `available()` → that provider.\n- A pinned id not registered → `WEB_PROVIDER_CONFIGURED_MISSING`.\n- A pinned id registered but unavailable → `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` (a pin never falls back).\n- No pin, a non-empty preference list → walk it in order: first registered and usable entry wins, unusable entries are skipped, any unregistered entry throws `WEB_PROVIDER_CONFIGURED_MISSING` (validated before the walk), and an exhausted list throws `WEB_PROVIDER_UNAVAILABLE`.\n- Neither pin nor list, exactly one registered usable provider → that provider (never order-dependent).\n- Neither pin nor list, multiple usable providers → `WEB_PROVIDER_AMBIGUOUS`.\n- Neither pin nor list, no usable provider → `WEB_PROVIDER_UNAVAILABLE`.',
     methods: [
       {
         signature: 'registerSearchProvider(provider: WebSearchProvider): () => void',
@@ -3666,8 +3704,36 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PromptSection {\n    readonly name: string;\n    readonly order: number;\n    readonly text: string | ((context: AssembleContext) => string);\n    readonly complete?: boolean;\n}',
   },
   {
+    name: 'ProviderPlanWindowSnapshot',
+    declaration: 'export interface ProviderPlanWindowSnapshot {\n    window: string;\n    usedPercent: number;\n    reset?: number;\n}',
+  },
+  {
+    name: 'ProviderQuotaDimension',
+    declaration: 'export type ProviderQuotaDimension = \'requests\' | \'tokens\' | \'inputTokens\' | \'outputTokens\';',
+  },
+  {
+    name: 'ProviderQuotaDimensionSnapshot',
+    declaration: 'export interface ProviderQuotaDimensionSnapshot {\n    dimension: ProviderQuotaDimension;\n    limit: number;\n    remaining: number;\n    reset?: number;\n}',
+  },
+  {
     name: 'ProviderRequestId',
     declaration: 'export type ProviderRequestId = Branded<\'ProviderRequestId\'>;',
+  },
+  {
+    name: 'ProviderStatusPublication',
+    declaration: 'export interface ProviderStatusPublication {\n    routeId: string;\n    credentialIdentity?: string;\n}',
+  },
+  {
+    name: 'ProviderStatusRecord',
+    declaration: 'export type ProviderStatusRecord = ({\n    kind: \'snapshot\';\n} & ProviderStatusSnapshot) | ({\n    kind: \'unavailable\';\n} & ProviderStatusUnavailable);',
+  },
+  {
+    name: 'ProviderStatusSnapshot',
+    declaration: 'export interface ProviderStatusSnapshot {\n    routeId: string;\n    dimensions: readonly ProviderQuotaDimensionSnapshot[];\n    windows: readonly ProviderPlanWindowSnapshot[];\n    observedAt: number;\n    source: \'response-headers\';\n}',
+  },
+  {
+    name: 'ProviderStatusUnavailable',
+    declaration: 'export interface ProviderStatusUnavailable {\n    routeId: string;\n    observedAt: number;\n    reason: string;\n}',
   },
   {
     name: 'PrunedEntry',
@@ -4751,7 +4817,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WorkflowRun',
-    declaration: 'export interface WorkflowRun {\n    readonly id: WorkflowRunId;\n    readonly meta: WorkflowMeta;\n    readonly result: Promise<WorkflowResult>;\n    cancel(reason?: string): void;\n    dispose(): Promise<void>;\n}',
+    declaration: 'export interface WorkflowRun {\n    readonly id: WorkflowRunId;\n    readonly meta: WorkflowMeta;\n    readonly result: Promise<WorkflowResult>;\n    cancel(reason?: string): void;\n    steer(text: string): boolean;\n    dispose(): Promise<void>;\n}',
   },
   {
     name: 'WorkflowRunId',

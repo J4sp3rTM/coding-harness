@@ -2,7 +2,7 @@
 
 [English](web.md) | 中文
 
-Web 访问 seam 是一个能力 seam，在同一个 `ctx.web` 服务上横跨**两项操作**（search 与 fetch），并拆分到多个包：Service Definition（[dsh-web](../../packages/web/web)，`ctx.web` + 提供方注册表）、Service Provider（[dsh-web-search-exa](../../packages/web/web-search-exa)、[dsh-web-search-perplexity](../../packages/web/web-search-perplexity)、[dsh-web-search-deepseek](../../packages/web/web-search-deepseek)、[dsh-web-fetch-http](../../packages/web/web-fetch-http)）与 Consumer（[dsh-tool-web](../../packages/web/tool-web)，即 `web_search`/`web_fetch` 工具 schema）。Web 是**一项可选能力**，不属于 agent loop（智能体循环）主干，因此其词汇定义在此而非 [core.md](core.md) 中。更换 search 提供方不会改变模型提交查询的方式，更换 fetch 提供方也不会改变模型请求 URL 的方式。
+Web 访问 seam 是一个能力 seam，在同一个 `ctx.web` 服务上横跨**两项操作**（search 与 fetch），并拆分到多个包：Service Definition（[dsh-web](../../packages/web/web)，`ctx.web` + 提供方注册表）、Service Provider（[dsh-web-search-exa](../../packages/web/web-search-exa)、[dsh-web-search-perplexity](../../packages/web/web-search-perplexity)、[dsh-web-search-deepseek](../../packages/web/web-search-deepseek)、[dsh-web-search-duckduckgo](../../packages/web/web-search-duckduckgo)、[dsh-web-fetch-http](../../packages/web/web-fetch-http)）与 Consumer（[dsh-tool-web](../../packages/web/tool-web)，即 `web_search`/`web_fetch` 工具 schema）。Web 是**一项可选能力**，不属于 agent loop（智能体循环）主干，因此其词汇定义在此而非 [core.md](core.md) 中。更换 search 提供方不会改变模型提交查询的方式，更换 fetch 提供方也不会改变模型请求 URL 的方式。
 
 源码：[`packages/web/web/src/types.ts`](../../packages/web/web/src/types.ts)
 
@@ -121,7 +121,7 @@ type WebFetchBody =
 
 提供方的 `available(): boolean` 是一个廉价的本地检查（凭证是否存在、配置是否可解析），**禁止发起网络调用**。它是执行时选择提供方的输入，而不是健康检查系统：`search()`／`fetch()` 会读取它来选择可用的提供方。选择失败时，调用方会收到可据以分支处理的结构化 `WebError`；其错误代码和消息会说明缺失的 id 或存在歧义的候选集。
 
-选择从不依赖注册顺序、配置顺序或 HMR（热模块替换）顺序：一项能力要么有显式的提供方 id（配置 `searchProvider`／`fetchProvider`，或填充同一字段的对应环境变量），要么在恰好只有一个可用提供方注册时自动选择；如果存在多个可用提供方却未配置 id，则抛出 `WEB_PROVIDER_AMBIGUOUS`，而不会选用最先注册的提供方。
+固定 id（`searchProvider`／`fetchProvider`，或填充同一字段的对应环境变量）优先，且永不回退。仅在未设置固定 id 时才应用有序列表（`searchProviders`／`fetchProviders`）：列表中第一个已注册且可用的 id 胜出，已注册但不可用的列表项被跳过，从未注册的列表项抛出 `WEB_PROVIDER_CONFIGURED_MISSING`。两者都未配置时才自动选择；如果存在多个可用提供方却既无固定 id 也无列表，则抛出 `WEB_PROVIDER_AMBIGUOUS`，而不会选用最先注册的提供方。
 
 ## 错误
 
@@ -129,7 +129,7 @@ type WebFetchBody =
 
 ## 服务
 
-`WebRuntime` 注册搜索与抓取提供方，以 `WEB_DUPLICATE_PROVIDER` 拒绝重复 id，并在执行时以结构化的选择错误解析提供方。本地抓取后端仅接受 HTTP(S)、拒绝凭证、限制重定向次数、字节数、字符数和时间、对每一次同源重定向跳转重新进行安全校验，并解码正文；展示由工具负责。本地后端不会拦截私有网络目标；在能够触及敏感内部目标的环境中，禁止启用 `web_fetch`。
+`WebRuntime` 注册搜索与抓取提供方，以 `WEB_DUPLICATE_PROVIDER` 拒绝重复 id，并在执行时以结构化的选择错误解析提供方。本地抓取后端仅接受 HTTP(S)、拒绝凭证、在连接前拦截私有网络主机名与地址、限制重定向次数、字节数、字符数和时间、对每一次同源重定向跳转重新进行安全校验，并解码正文；展示由工具负责。预连接检查与传输层连接之间的 DNS 重绑定仍是该提供方记录的已知限制。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -145,14 +145,15 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 The web access service. Registered as `ctx.web` (one instance per context).
 
-Selection semantics (resolved at execution time, never order-dependent):
+Selection semantics (resolved at execution time):
 
-- A configured id that is registered and `available()` → that provider.
-- A configured id not registered → `WEB_PROVIDER_CONFIGURED_MISSING`.
-- A configured id registered but unavailable → `WEB_PROVIDER_CONFIGURED_UNAVAILABLE`.
-- No id configured, exactly one registered usable provider → that provider.
-- No id configured, multiple usable providers → `WEB_PROVIDER_AMBIGUOUS`.
-- No id configured, no usable provider → `WEB_PROVIDER_UNAVAILABLE`.
+- A pinned id (`searchProvider`/`fetchProvider`) that is registered and `available()` → that provider.
+- A pinned id not registered → `WEB_PROVIDER_CONFIGURED_MISSING`.
+- A pinned id registered but unavailable → `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` (a pin never falls back).
+- No pin, a non-empty preference list → walk it in order: first registered and usable entry wins, unusable entries are skipped, any unregistered entry throws `WEB_PROVIDER_CONFIGURED_MISSING` (validated before the walk), and an exhausted list throws `WEB_PROVIDER_UNAVAILABLE`.
+- Neither pin nor list, exactly one registered usable provider → that provider (never order-dependent).
+- Neither pin nor list, multiple usable providers → `WEB_PROVIDER_AMBIGUOUS`.
+- Neither pin nor list, no usable provider → `WEB_PROVIDER_UNAVAILABLE`.
 
 ```ts cordis-catalog
 /**
@@ -195,5 +196,5 @@ async search(request: WebSearchRequest, signal?: AbortSignal): Promise<WebSearch
 async fetch(request: WebFetchRequest, signal?: AbortSignal): Promise<WebFetchResult>
 ```
 
-Source: [`packages/web/web/src/index.ts:74`](../../packages/web/web/src/index.ts)
+Source: [`packages/web/web/src/index.ts:101`](../../packages/web/web/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -1,17 +1,23 @@
 /**
- * Safe HTTP(S) retrieval for `ctx.web`: validates URLs, follows only same-origin redirects,
- * enforces time and size limits, classifies and decodes text, and leaves presentation to
- * `@deepseek-ai/dsh-tool-web`. Requests carry no browser cookies or ambient credentials.
+ * Safe HTTP(S) retrieval for `ctx.web`: validates URLs, blocks private-network
+ * targets (literal or resolved, re-checked on every redirect hop), follows only
+ * same-origin redirects, enforces time and size limits, classifies and decodes
+ * text, and leaves presentation to `@deepseek-ai/dsh-tool-web`. Requests carry
+ * no browser cookies or ambient credentials.
  *
- * Private-network and SSRF protection is not implemented; do not enable this provider where
- * it can reach sensitive internal targets.
+ * The private-network check resolves hostnames before connecting but cannot pin
+ * the address the transport finally connects to: a hostile DNS server answering
+ * differently between check and connect (DNS rebinding) is outside this
+ * checker's reach — see the package README's Known Limitations.
  * @module @deepseek-ai/dsh-web-fetch-http/provider
  */
 
+import { lookup } from 'node:dns/promises'
 import { WebError } from '@deepseek-ai/dsh-web'
 import type { WebFetchBody, WebFetchProvider, WebFetchRequest, WebFetchResult } from '@deepseek-ai/dsh-web'
 import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from './policy.ts'
+import { assertAddressAllowed, assertPublicHostname, isIpLiteral } from './ssrf.ts'
 
 /** Resolved provider limits (the plugin's schemastery Config supplies defaults). */
 export interface HttpFetchLimits {
@@ -27,7 +33,20 @@ export interface HttpFetchLimits {
   maxRedirects: number
   /** `User-Agent` header sent on every request. */
   userAgent: string
+  /**
+   * Waive ONLY the loopback class of the private-network block (loopback
+   * hostnames, 127.0.0.0/8, ::1), for loopback fixture servers and local
+   * development. Every other blocked range stays enforced either way.
+   */
+  allowLoopback: boolean
 }
+
+/** Resolve one hostname to every address DNS offers for it. */
+export type ResolveAddresses = (hostname: string) => Promise<readonly string[]>
+
+/* v8 ignore next 2 -- production DNS is host-dependent; tests inject fixed resolver answers. */
+const defaultResolveAddresses: ResolveAddresses = async hostname =>
+  (await lookup(hostname, { all: true })).map(entry => entry.address)
 
 /** Stable id this provider registers under. */
 export const LOCAL_FETCH_PROVIDER_ID = 'http'
@@ -36,7 +55,15 @@ export const LOCAL_FETCH_PROVIDER_ID = 'http'
 export class HttpFetchProvider implements WebFetchProvider {
   readonly id = LOCAL_FETCH_PROVIDER_ID
 
-  constructor(private readonly limits: HttpFetchLimits) {}
+  /**
+   * @param limits - resolved transport and private-network policy values.
+   * @param resolveAddresses - hostname resolution; production uses `node:dns`,
+   * tests inject fixed answers so no suite depends on live DNS.
+   */
+  constructor(
+    private readonly limits: HttpFetchLimits,
+    private readonly resolveAddresses: ResolveAddresses = defaultResolveAddresses,
+  ) {}
 
   /** No credentials to check — an anonymous public fetcher is always usable. */
   available(): boolean {
@@ -52,12 +79,43 @@ export class HttpFetchProvider implements WebFetchProvider {
     return await this.followAndRead(request.url, d.signal)
   }
 
+  /**
+   * Run the private-network checks for one hop: hostname rules first (no DNS
+   * cost for a blocked name), then either the literal address itself or every
+   * address DNS offers for the name. A name resolving to ANY blocked address
+   * is refused, so a mixed public/private answer cannot slip through on the
+   * public member.
+   * @param url - this hop's request target, already transport-validated.
+   */
+  private async assertConnectableTarget(url: URL, signal: AbortSignal): Promise<void> {
+    const hostname = assertPublicHostname(url, this.limits.allowLoopback)
+    if (isIpLiteral(hostname)) {
+      assertAddressAllowed(hostname, this.limits.allowLoopback)
+      return
+    }
+    let addresses: readonly string[]
+    try {
+      addresses = await resolveWithAbort(this.resolveAddresses(hostname), signal)
+    } catch (error: unknown) {
+      if (signal.aborted) throw translateAbortOrNetwork(error, signal)
+      throw new WebError(`cannot resolve fetch target host "${hostname}"`, 'WEB_PROVIDER_ERROR', { cause: error })
+    }
+    if (addresses.length === 0) {
+      throw new WebError(`cannot resolve fetch target host "${hostname}"`, 'WEB_PROVIDER_ERROR')
+    }
+    for (const address of addresses) assertAddressAllowed(address, this.limits.allowLoopback)
+  }
+
   /** Follow same-origin redirects up to the hop cap, then read the final response. */
   private async followAndRead(initialUrl: string, signal: AbortSignal): Promise<WebFetchResult> {
     let currentUrl = validateFetchUrl(initialUrl, this.limits.maxUrlLength)
     let redirectsFollowed = 0
 
     for (;;) {
+      // Every hop — the direct target and each redirect destination alike —
+      // passes the private-network check immediately before its connection.
+      await this.assertConnectableTarget(currentUrl, signal)
+
       const response = await this.requestOnce(currentUrl, signal)
 
       if (isRedirectStatus(response.status)) {
@@ -220,6 +278,35 @@ function resolveRedirect(location: string, base: URL): URL {
     /* v8 ignore next 2 -- URL resolution against a valid absolute base effectively never throws; defensive guard. */
     throw new WebError(`invalid redirect Location "${location}"`, 'WEB_PROVIDER_ERROR', { cause: error })
   }
+}
+
+/**
+ * Settle a DNS lookup when the provider deadline or caller cancellation fires.
+ * `dns.promises.lookup` has no AbortSignal option, so the underlying lookup may
+ * continue in the OS while this operation stops waiting for it.
+ * @param promise - the in-flight address lookup.
+ * @param signal - the provider or caller cancellation signal.
+ * @returns the lookup value, or a rejection when the signal aborts first.
+ */
+function resolveWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  /* v8 ignore next -- fetch() rejects before DNS resolution when already aborted. */
+  if (signal.aborted) return Promise.reject(new Error('web fetch aborted', { cause: signal.reason }))
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = (): void => { signal.removeEventListener('abort', onAbort) }
+    const onAbort = (): void => {
+      cleanup()
+      reject(new Error('web fetch aborted', { cause: signal.reason }))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then((value) => {
+      cleanup()
+      resolve(value)
+    }, (error: unknown) => {
+      cleanup()
+      /* v8 ignore next -- node:dns rejects with Error instances. */
+      reject(error instanceof Error ? error : new Error(String(error), { cause: error }))
+    })
+  })
 }
 
 /**

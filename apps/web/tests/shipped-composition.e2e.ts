@@ -4,7 +4,10 @@
 // No browser and no model call — these are composition facts, and the browser
 // scenarios in this lane cover the surface itself.
 import { readFileSync } from 'node:fs'
+import { createServer, type Server } from 'node:http'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
 import { CallId } from '@deepseek-ai/dsh-llm'
@@ -28,9 +31,8 @@ const FILE_REFERENCE_PROMPT = fileURLToPath(new URL(
  * The catalog the shipped Web composition puts in front of the model, minus the
  * ripgrep-dependent pair below. The absences are deliberate, not incidental
  * gaps: the `cordis_*` toolset executes model-written JavaScript that no
- * sandbox row confines, `web_fetch` chooses its own request target, and
- * `mcp_*` servers spawn outside `ctx.shell`. The composition Agent Note owns the
- * rationale and its sources.
+ * sandbox row confines, and `mcp_*` servers spawn outside `ctx.shell`. The
+ * composition Agent Note owns the rationale and its sources.
  */
 const EXPECTED_TOOLS = [
   'ask_user_question',
@@ -53,6 +55,7 @@ const EXPECTED_TOOLS = [
   'subagent_fork',
   'todo_write',
   'update_goal',
+  'web_fetch',
   'web_search',
   'workflow',
   'write',
@@ -128,6 +131,66 @@ it('assembles the shipped Web catalog, file-reference guidance, and confined acc
     ]))
   } finally {
     await commandHandle.dispose()
+  }
+}, 120_000)
+
+it('executes web_search through the shipped DuckDuckGo fallback with DeepSeek unavailable', async () => {
+  let server: Server | undefined
+  let overlayDir: string | undefined
+  try {
+    let method: string | undefined
+    let requestBody = ''
+    server = createServer((request, response) => {
+      method = request.method
+      const chunks: Buffer[] = []
+      request.on('data', (chunk: unknown) => {
+        if (typeof chunk !== 'string' && !(chunk instanceof Uint8Array)) throw new TypeError('unexpected request body chunk')
+        chunks.push(Buffer.from(chunk))
+      })
+      request.on('end', () => {
+        requestBody = Buffer.concat(chunks).toString('utf8')
+        response.writeHead(200, { 'content-type': 'text/html' })
+        response.end('<a class="result__a" href="https://assembled.example/">Assembled result</a>')
+      })
+    })
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('web composition fixture did not bind a TCP address')
+
+    overlayDir = await mkdtemp(join(tmpdir(), 'dsh-web-composition-overlay-'))
+    const overlayPath = join(overlayDir, 'cordis.patch.yml')
+    await writeFile(overlayPath, [
+      '- id: web-search-duckduckgo',
+      '  config:',
+      `    baseURL: http://127.0.0.1:${address.port}/html/`,
+      '',
+    ].join('\n'))
+    scaffold = await launchWebScaffold({ extraOverlayPath: overlayPath, deepSeekMissingCredential: true })
+    const handle = await scaffold.ctx.agents.create({
+      sessionId: SessionId('shipped-web-search-fallback'),
+      setup: agentCtx => scaffold!.ctx.agentPresets.mount(agentCtx).then(() => undefined),
+    })
+    try {
+      const result = await scaffold.ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: CallId('shipped-web-search-fallback-call'),
+        name: 'web_search',
+        arguments: { query: 'assembled fallback' },
+        agent: handle.agent,
+      })
+      expect(result.isError).toBe(false)
+      expect(result.content.map(block => block.type === 'text' ? block.text : '').join(''))
+        .toContain('[Assembled result](https://assembled.example/)')
+      expect(method).toBe('POST')
+      expect(requestBody).toBe('q=assembled+fallback')
+    } finally {
+      await handle.dispose()
+    }
+  } finally {
+    await scaffold?.close()
+    scaffold = undefined
+    if (server !== undefined) await new Promise<void>(resolve => server!.close(() => { resolve() }))
+    if (overlayDir !== undefined) await rm(overlayDir, { recursive: true, force: true })
   }
 }, 120_000)
 

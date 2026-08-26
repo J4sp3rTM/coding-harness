@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialRef, type CredentialInfo } from '@deepseek-ai/dsh-credentials'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
+import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import {
   DeepSeekSearchProvider,
@@ -28,6 +29,19 @@ const options = {
   apiVersion: '2023-06-01',
   maxTokens: 4096,
   maxUses: 5,
+}
+
+/** In-memory settings seam used to exercise the provider's live-section hook. */
+class MemorySettingsProvider extends SettingsProvider {
+  readonly writable = true
+
+  protected load(): Promise<Record<string, unknown>> {
+    return Promise.resolve({})
+  }
+
+  protected persist(_ns: SettingsNamespace, _section: Record<string, unknown>): Promise<void> {
+    return Promise.resolve()
+  }
 }
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
@@ -404,11 +418,29 @@ describe('web-search-deepseek plugin registration', () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(searchResponse())))
     const ctx = new Context()
     await ctx.plugin(WebRuntime, { searchProvider: DEEPSEEK_PROVIDER_ID })
+    await ctx.plugin(MemorySettingsProvider)
     const fiber = await ctx.plugin(deepseekPlugin, { apiKey: 'ds-key' })
+    await ctx.settings.mutate(deepseekPlugin.WEB_SEARCH_DEEPSEEK_SETTINGS_NAMESPACE, [
+      { op: 'set', path: ['model'], value: 'updated-model' },
+    ])
     await expect(ctx.web.search({ query: 'q' })).resolves.toMatchObject({ truncated: false })
     await fiber.dispose()
     await expect(ctx.web.search({ query: 'q' }))
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_MISSING' }))
+  })
+
+  it('reports unavailable without a key so an ordered seam list can reach its fallback', async () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', '')
+    const ctx = new Context()
+    await ctx.plugin(WebRuntime, { searchProviders: [DEEPSEEK_PROVIDER_ID, 'fallback'] })
+    ctx.web.registerSearchProvider({
+      id: 'fallback',
+      available: () => true,
+      search: async () => ({ sources: [{ url: 'https://fallback.test/' }], truncated: false }),
+    })
+    const fiber = await ctx.plugin(deepseekPlugin, { baseURL: 'https://api.deepseek.test/anthropic/v1' })
+    await expect(ctx.web.search({ query: 'q' })).resolves.toMatchObject({ sources: [{ url: 'https://fallback.test/' }] })
+    await fiber.dispose()
   })
 
   it('rejects maxTokens: 0 at plugin construction', async () => {
@@ -467,7 +499,7 @@ describe('web-search-deepseek plugin registration', () => {
       vi.stubGlobal('fetch', fetchMock)
       const ctx = new Context()
       await ctx.plugin(WebRuntime, { searchProvider: DEEPSEEK_PROVIDER_ID })
-      deepseekPlugin.apply(ctx, {})
+      await deepseekPlugin.apply(ctx, {})
       await ctx.web.search({ query: 'q' })
       const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
       expect(url).toBe('https://api.deepseek.com/anthropic/v1/messages')
@@ -493,7 +525,7 @@ describe('web-search-deepseek plugin registration', () => {
       await ctx.plugin(deepseekPlugin, { baseURL: 'https://api.deepseek.test/anthropic/v1' })
 
       await expect(ctx.web.search({ query: 'missing' }))
-        .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_CREDENTIAL_MISSING' }))
+        .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_UNAVAILABLE' }))
 
       const ref = credentialRef('DEEPSEEK_API_KEY')
       await ctx.credentials.set(ref, 'stored-key')
@@ -511,16 +543,71 @@ describe('web-search-deepseek plugin registration', () => {
     }
   })
 
+  it('fails closed across a set/unset describe race before reaching the fallback', async () => {
+    const previous = process.env.DEEPSEEK_API_KEY
+    delete process.env.DEEPSEEK_API_KEY
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-web-search-credential-race-'))
+    const ctx = new Context()
+    const ref = credentialRef('DEEPSEEK_API_KEY')
+    let resolveSetDescribe!: (info: CredentialInfo) => void
+    let resolveUnsetDescribe!: (info: CredentialInfo) => void
+    const setDescribe = new Promise<CredentialInfo>((resolve) => { resolveSetDescribe = resolve })
+    const unsetDescribe = new Promise<CredentialInfo>((resolve) => { resolveUnsetDescribe = resolve })
+    const describe = vi.fn()
+      .mockResolvedValueOnce({ configured: false, writable: true })
+      .mockReturnValueOnce(setDescribe)
+      .mockReturnValueOnce(unsetDescribe)
+    const fetchMock = vi.fn(async () => jsonResponse(searchResponse()))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await ctx.plugin(WebRuntime, { searchProviders: [DEEPSEEK_PROVIDER_ID, 'duckduckgo'] })
+      await ctx.plugin(LocalCredentialProvider, { path: join(dir, '.credentials.yaml'), watch: false })
+      vi.spyOn(ctx.credentials, 'describe').mockImplementation(describe)
+      ctx.web.registerSearchProvider({
+        id: 'duckduckgo',
+        available: () => true,
+        search: async () => ({ sources: [{ url: 'https://fallback.test/' }], truncated: false }),
+      })
+      await ctx.plugin(deepseekPlugin, { baseURL: 'https://api.deepseek.test/anthropic/v1' })
+
+      await ctx.credentials.set(ref, 'stored-key')
+      await expect(ctx.web.search({ query: 'set-pending' })).resolves.toMatchObject({ sources: [{ url: 'https://fallback.test/' }] })
+      await ctx.credentials.unset(ref)
+      await expect(ctx.web.search({ query: 'unset-pending' })).resolves.toMatchObject({ sources: [{ url: 'https://fallback.test/' }] })
+      expect(describe).toHaveBeenCalledTimes(3)
+
+      // The stale set result must not reopen the provider after the unset event.
+      resolveSetDescribe({ configured: true, source: 'file', writable: true })
+      await Promise.resolve()
+      await expect(ctx.web.search({ query: 'stale-set' })).resolves.toMatchObject({ sources: [{ url: 'https://fallback.test/' }] })
+
+      resolveUnsetDescribe({ configured: false, writable: true })
+      await Promise.resolve()
+      await expect(ctx.web.search({ query: 'unset-settled' })).resolves.toMatchObject({ sources: [{ url: 'https://fallback.test/' }] })
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(dir, { recursive: true, force: true })
+      if (previous === undefined) delete process.env.DEEPSEEK_API_KEY
+      else process.env.DEEPSEEK_API_KEY = previous
+    }
+  })
+
   it('reports an actionable credential error when neither config nor env supplies a key', async () => {
     const prev = process.env.DEEPSEEK_API_KEY
     delete process.env.DEEPSEEK_API_KEY
     try {
-      const ctx = new Context()
-      await ctx.plugin(WebRuntime, { searchProvider: DEEPSEEK_PROVIDER_ID })
-      await ctx.plugin(deepseekPlugin, {})
+      const provider = searchProvider({
+        apiKeyEnv: credentialRef('DEEPSEEK_API_KEY'),
+        baseURL: 'https://api.deepseek.test/anthropic/v1',
+        model: 'deepseek-v4-flash',
+        apiVersion: '2023-06-01',
+        maxTokens: 4096,
+        maxUses: 5,
+        resolveApiKey: () => Promise.resolve(undefined),
+      })
       let caught: unknown
       try {
-        await ctx.web.search({ query: 'q' })
+        await provider.search({ query: 'q' })
       } catch (error: unknown) {
         caught = error
       }
