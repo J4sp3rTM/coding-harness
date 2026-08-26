@@ -7,7 +7,7 @@ One page per subsystem of the DeepSeek Harness: what it is, the data structures 
 | Page | Owns |
 |---|---|
 | [core.md](core.md) | how `packages/core` controls the agent loop: the package-by-package loop description, agent creation and ownership (`AgentHandle`), the `Agent` handle's delivery/cancellation/interception contracts, and the repo-wide type patterns (`…Map → derived-union`, branded ids) |
-| [llm-streaming.md](llm-streaming.md) | the `packages/llm` conversation and authentication types — `Message`/`ContentBlock`, assembled requests, streaming, the adapter contract, and subscription sign-in |
+| [llm-streaming.md](llm-streaming.md) | the `packages/llm` conversation and authentication types — `Message`/`ContentBlock`, assembled requests, streaming, the adapter contract, subscription sign-in, and last-observed provider quota |
 | [token-meter.md](token-meter.md) | immutable scalar and positional replay measurements with consumed-log revisions |
 | [scope.md](scope.md) | scoped registration identity, dispatch carriers, and the owned `Scope` context |
 | [typert.md](typert.md) | Remote invocation descriptors, lookup/Context declarations, Typert registries, and the Host Gateway/Client API boundaries |

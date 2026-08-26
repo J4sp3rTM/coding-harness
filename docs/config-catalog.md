@@ -931,7 +931,7 @@ export interface DeepSeekCatalogModel {
 
 Depends on: [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts)
 
-Source: [`packages/llm/llm-deepseek/src/index.ts:62`](../packages/llm/llm-deepseek/src/index.ts)
+Source: [`packages/llm/llm-deepseek/src/index.ts:80`](../packages/llm/llm-deepseek/src/index.ts)
 
 <a id="deepseek-aidsh-llm-oauth-local"></a>
 
@@ -1460,6 +1460,17 @@ export interface PlanModeConfig {
 ```
 
 Source: [`packages/plan/plan-mode/src/index.ts:70`](../packages/plan/plan-mode/src/index.ts)
+
+<a id="deepseek-aidsh-provider-status"></a>
+
+## `@deepseek-ai/dsh-provider-status`
+
+```ts config-catalog
+/** Service configuration; this store takes no settings. */
+export interface ProviderStatusConfig {}
+```
+
+Source: [`packages/llm/provider-status/src/index.ts:30`](../packages/llm/provider-status/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 
@@ -2486,7 +2497,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/workflow/tool-development-workflow/src/index.ts:63`](../packages/workflow/tool-development-workflow/src/index.ts)
+Source: [`packages/workflow/tool-development-workflow/src/index.ts:64`](../packages/workflow/tool-development-workflow/src/index.ts)
 
 <a id="deepseek-aidsh-tool-fs"></a>
 
@@ -2727,10 +2738,10 @@ export interface Config {
    */
   enableRunInBackground?: boolean
   /**
-   * Background execution policy (default `one-shot`). Calls wait for results by
-   * default; `continuable` enables durable background children when explicitly
-   * requested, requires a provider with the `prepareContinuable` capability, and
-   * returns the durable child id. Follow-up adapters remain independently optional.
+   * Background execution policy (default `one-shot`). `one-shot` defaults calls
+   * to foreground; `continuable` defaults them to background, requires a provider
+   * with the `prepareContinuable` capability, and returns the durable child id.
+   * Follow-up adapters remain independently optional.
    */
   backgroundMode?: 'one-shot' | 'continuable'
   /**
@@ -2780,9 +2791,9 @@ Requires: `subagents` · `tools` · `systemPrompt`
 /** Config: how accepted reports are scheduled on the parent. */
 export interface Config {
   /**
-   * Parent scheduling (default `wakeup`). `wakeup` creates one ordinary later
-   * parent turn; `quiet` adds context without waking, so a parked parent learns
-   * of the report only when something else wakes it.
+   * Parent scheduling (default `wakeup`). `wakeup` steers next-step context and
+   * wakes a parked parent; `quiet` adds context without waking, so a parked
+   * parent learns of the report only when something else wakes it.
    */
   reportDelivery?: SubagentReportDelivery
 }
@@ -2874,7 +2885,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/workflow/tool-workflow/src/index.ts:28`](../packages/workflow/tool-workflow/src/index.ts)
+Source: [`packages/workflow/tool-workflow/src/index.ts:29`](../packages/workflow/tool-workflow/src/index.ts)
 
 <a id="deepseek-aidsh-tools"></a>
 
@@ -2965,20 +2976,49 @@ Source: [`packages/interaction/user-approval/src/index.ts:177`](../packages/inte
 
 ```ts config-catalog
 /**
- * Config for the web seam. `searchProvider` / `fetchProvider` pin which provider
- * wins for each capability; both are optional (a single registered usable
- * provider auto-selects). Operational overrides such as environment variables
- * must feed these same fields rather than introduce a hidden priority chain.
+ * Config for the web seam. Precedence is explicit over implicit, one clear rule:
+ * a single pinned id (`searchProvider` / `fetchProvider`, including its
+ * `$DSH_WEB_*_PROVIDER` environment form) wins outright and the preference list
+ * is ignored while a pin is set; the ordered list (`searchProviders` /
+ * `fetchProviders`) applies only when no pin is set; auto-selection applies only
+ * when neither is configured. Operational overrides such as environment
+ * variables must feed these same fields rather than introduce a hidden priority
+ * chain.
  */
 export interface WebRuntimeConfig {
-  /** Explicit search provider id. Omitted = auto-select when exactly one usable. */
+  /**
+   * Explicit search provider id — the strongest pin. Omitted = the
+   * `searchProviders` list applies; when that is also omitted, auto-select when
+   * exactly one usable provider is registered.
+   */
   readonly searchProvider?: string
-  /** Explicit fetch provider id. Omitted = auto-select when exactly one usable. */
+  /**
+   * Ordered search preference applied when no {@link searchProvider} pin is set.
+   * Walked in order at execution time: the first registered AND available entry
+   * wins; an entry that is registered but unavailable is skipped (that skipping
+   * is the fallback behavior); an entry that is never registered fails with
+   * `WEB_PROVIDER_CONFIGURED_MISSING` regardless of position; an exhausted list
+   * fails with `WEB_PROVIDER_UNAVAILABLE`. An empty list means no preference —
+   * the schema layer cannot distinguish it from an omitted field — and falls
+   * through to auto-selection.
+   */
+  searchProviders?: string[]
+  /**
+   * Explicit fetch provider id — the strongest pin. Omitted = the
+   * `fetchProviders` list applies; when that is also omitted, auto-select when
+   * exactly one usable provider is registered.
+   */
   readonly fetchProvider?: string
+  /**
+   * Ordered fetch preference, symmetric to {@link searchProviders} and applied
+   * under the same rules when no {@link fetchProvider} pin is set. An empty
+   * list means no preference and falls through to auto-selection.
+   */
+  fetchProviders?: string[]
 }
 ```
 
-Source: [`packages/web/web/src/index.ts:55`](../packages/web/web/src/index.ts)
+Source: [`packages/web/web/src/index.ts:51`](../packages/web/web/src/index.ts)
 
 <a id="deepseek-aidsh-web-app"></a>
 
@@ -3012,7 +3052,7 @@ Source: [`packages/bundle/web-app/src/index.ts:38`](../packages/bundle/web-app/s
 Requires: `web`
 
 ```ts config-catalog
-/** Plugin config: the provider's transport and size limits plus its `User-Agent` (all defaulted). */
+/** Plugin config: transport and size limits, `User-Agent`, and the private-network policy. */
 export interface Config {
   /** Maximum accepted request URL length. */
   maxUrlLength?: number
@@ -3026,6 +3066,12 @@ export interface Config {
   maxRedirects?: number
   /** `User-Agent` header sent on every request. */
   userAgent?: string
+  /**
+   * Waive ONLY the loopback class of the private-network block (loopback
+   * hostnames, 127.0.0.0/8, ::1), for loopback fixture servers and local
+   * development. Defaults to false — the guard enforces every blocked range.
+   */
+  allowLoopback?: boolean
 }
 ```
 
@@ -3058,6 +3104,24 @@ export interface Config {
 ```
 
 Source: [`packages/web/web-search-deepseek/src/index.ts:46`](../packages/web/web-search-deepseek/src/index.ts)
+
+<a id="deepseek-aidsh-web-search-duckduckgo"></a>
+
+## `@deepseek-ai/dsh-web-search-duckduckgo`
+
+Requires: `web`
+
+```ts config-catalog
+/** Plugin config: where to ask and how much markup to accept. No keys exist. */
+export interface Config {
+  /** HTML-endpoint base URL; the search form is POSTed here. */
+  baseURL?: string
+  /** Inclusive response size cap in bytes; larger bodies fail the operation. */
+  maxResponseBytes?: number
+}
+```
+
+Source: [`packages/web/web-search-duckduckgo/src/index.ts:34`](../packages/web/web-search-duckduckgo/src/index.ts)
 
 <a id="deepseek-aidsh-web-search-exa"></a>
 
@@ -3126,6 +3190,11 @@ export interface Config {
   maxItemsPerCall?: number
   /** vm timeout for the script's initial synchronous slice, inside the worker (default 5000 ms). */
   syncTimeoutMs?: number
+  /**
+   * Forwarded operator messages one run's undrained steering mailbox retains
+   * before dropping its oldest entry (default 16).
+   */
+  maxSteeringMessages?: number
   /**
    * How long after a cancellation an unsettled script may keep running before
    * the run force-settles `cancelled` and its worker is TERMINATED (default
