@@ -1,5 +1,7 @@
 # Real-dataset harness benchmark: DSH vs Claude Code
 
+English | [中文](README.zh.md)
+
 Compares the DSH harness against the Claude Code harness on 130 real tasks from
 trusted public benchmarks, both driving `stealth/ox-alpha` through OpenRouter so
 the harness is the only variable. Extends the earlier synthetic comparison in

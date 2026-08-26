@@ -51,9 +51,9 @@ for (const [key, list] of [...cells.entries()].sort((a, b) => a[0].localeCompare
   const passed = scored.filter(strictPass).length
   const failed = scored.filter(r => !strictPass(r)).length
   const pending = done.length - scored.length
-  const mins = median(done.map(r => (r.durationMs ?? 0) / 60_000))
+  const mins = median(scored.map(r => (r.durationMs ?? 0) / 60_000))
   const [ds, h] = key.split('|')
-  summaryRows += `<tr><td>${esc(ds)}</td><td>${esc(h)}</td><td>${list.length}</td><td class="pass">${passed}</td><td class="fail">${failed}</td><td class="pending">${pending}</td><td>${mins === null ? '—' : mins.toFixed(1)}</td></tr>`
+  summaryRows += `<tr><td>${esc(ds)}</td><td>${esc(h)}</td><td>${list.length}</td><td class="pass">${passed}</td><td class="fail">${failed}</td><td class="pending">${pending}</td><td>${mins === null ? '—' : mins.toFixed(1) + ' (n=' + scored.length + ')'}</td></tr>`
 }
 
 // --- full per-task matrix over the frozen manifest ----------------------------
