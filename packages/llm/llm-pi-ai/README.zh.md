@@ -149,7 +149,7 @@ profile 的 `models` 列表是*替换*该路由已安装 catalog，而不是扩�
 
 ## 提供方状态观察
 
-当可选的 [`ctx.providerStatus`](../provider-status/README.md) 服务在组合中时，适配器会发布每次成功响应的成文标头所披露的路由配额信息。OpenAI 的 `x-ratelimit-*` 与 Anthropic 的 `anthropic-ratelimit-*` 字段变成按维度的 limit/remaining 对；Anthropic OAuth unified utilization 与 OpenAI Codex OAuth used-percent 字段则变成带提供方重置时间的订阅计划窗口。其余标头一律忽略；可识别字段取值全部不可解析时记录显式的不可用状态，而响应不含任何可识别字段时不发布任何内容。这一观察只是请求旁边的参考性记录：观察者失败绝不会让模型调用失败，未组合该服务时一切保持不变。
+当可选的 [`ctx.providerStatus`](../provider-status/README.md) 服务在组合中时，适配器会发布每次成功响应的成文标头所披露的路由配额信息。OpenAI 的 `x-ratelimit-*` 与 Anthropic 的 `anthropic-ratelimit-*` 字段变成按维度的 limit/remaining 对；Anthropic OAuth unified utilization 与 OpenAI Codex OAuth used-percent 字段则变成带提供方重置时间的订阅计划窗口。其余标头一律忽略；可识别字段取值全部不可解析时记录显式的不可用状态，而响应不含任何可识别字段时不发布任何内容。空轴会从发布中省略，以便随后的采集能保留另一轴。适配器还会注册 `providerStatus.refresh`：对 `openai-codex` 通过 Codex OAuth 使用 GET `chatgpt.com/backend-api/wham/usage` 发布限流窗口，对 `xai` 则 GET SuperGrok 的 `cli-chat-proxy.grok.com/v1/billing?format=credits`，并把 `creditUsagePercent` 发布为 `7d`/`30d` 计划窗口。这些 HTTP 观察只是参考性记录：观察者或采集失败绝不会让模型调用或 `/usage` 失败，未组合该服务时一切保持不变。
 
 ## 提供方／模型路由与回放
 
@@ -215,7 +215,7 @@ pi-ai 事件会变为 harness 推理、文本、工具调用、usage 与 finish 
 
 - **空路由启动是 debug，不是 stderr**：`reportRoutes()` 把普通的首次运行空状态（`subscription sign-ins: (none)`、没有已注册路由）记到 debug，让 stderr 继续作为错误通道。已配置路由记 info；已登录但没有模型的订阅记 warn。
 - **订阅路由需要组合登录 seam**：pi-ai 的 OAuth 只从*已存储*的凭据解析，且没有任何环境发现路径，因此本适配器的集合经由 `ctx.llmOAuth` 读取。未组合登录服务的部署把每条路由都留在 key 路径上，而只有 OAuth 一种方法的路由（已安装 catalog 中即 `openai-codex`）在那里会以 `Provider is not configured` 失败。只有 catalog 为其附带 OAuth 方法的路由才谈得上登录：手工声明的网关没有流程，因此在它上面写 `auth: subscription` 会在写入处被拒绝。
-- **Codex 计划标头仅在 SSE 可见**：pi-ai 只在 SSE 传输中暴露 `x-codex-*` 计划标头。默认 WebSocket 传输不会产生 HTTP 响应，因此无法在那里观察 Codex 计划窗口；适配器不更改默认值。
+- **Codex 计划窗口使用提供方端点**：默认 WebSocket 传输不会产生 HTTP 响应标头，因此 `/usage` 使用已存储的 Codex OAuth 令牌读取 `chatgpt.com/backend-api/wham/usage`。这独立于普通模型传输，也不会发送模型提示词。
 - **提供方自带的凭据发现只读进程环境**：不指定凭据的路由交由 catalog 提供方自行解析，而它探测的是环境变量（`AZURE_OPENAI_API_KEY`、`AWS_PROFILE`、`AWS_ACCESS_KEY_ID` 以及各提供方自己的那一组）。它不读任何本地凭据目录，因此只有 `~/.aws/credentials` 而未导出 `AWS_PROFILE` 会被解析为未配置；由 harness 凭据 seam 保管的值，除非进程环境里也有，否则对它不可见。
 - **settings 能新增或覆盖路由，但不能移除组合路由**：用户层合并在组合 `base` 之上，因此删除 `cordis.yml` 提供的提供方属于组合变更；对该 namespace 执行 `replace` 只会重置用户层。
 - **分层合并对字典键没有删除语义**：settings seam 把组合 `base` 与用户层按键递归合并，因此 base 声明的某个 `reasoningEfforts` 档位、`modelOverrides` 条目或 `compat` 字段，用户层只能覆盖、无法移除——而 `reasoningEfforts` 里缺席本身*就是*语义（「不提供」），于是 base 声明过的档位会一直被提供。只有 `cordis.yml` entry config 为用户层正在编辑的同一模型声明了按模型推理字段才会触发；受支持的姿态是把这些字段留给 settings 文档（shipped 组合以 dormant 方式挂载该适配器），且 `models` 列表是数组、整体替换，这是带内的解决办法。

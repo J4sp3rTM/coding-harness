@@ -8,6 +8,7 @@ import type {
   StoredImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
 import LlmRuntime, { createUserMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, ReasoningEffortId, userAgent } from '@deepseek-ai/dsh-llm'
+import ProviderStatus from '@deepseek-ai/dsh-provider-status'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
@@ -967,7 +968,6 @@ describe('provider response observation', () => {
     expect(published).toEqual([{
       routeId: 'deepseek',
       credentialIdentity: 'PI_TEST_KEY',
-      windows: [],
       dimensions: [
         { dimension: 'requests', limit: 60, remaining: 59 },
         { dimension: 'tokens', limit: 100_000, remaining: 99_940 },
@@ -1014,5 +1014,102 @@ describe('provider response observation', () => {
     const ctx = await harness(server.url)
     const result = await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
     expect(result.finish).toEqual({ kind: 'stop' })
+  })
+
+  it('refresh on xai publishes SuperGrok billing windows', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(ProviderStatus)
+    ctx.reflect.provide('llmOAuth', {
+      tokens: () => ({
+        read: async () => ({ access: 'tok', refresh: '', expires: Date.now() + 60_000 }),
+      }),
+    })
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({
+      config: {
+        creditUsagePercent: 20,
+        currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-08-27T00:00:00Z' },
+      },
+    }), { status: 200 }))
+    try {
+      await ctx.plugin(LlmPiAi, { providers: { xai: { auth: 'subscription' } } })
+      await ctx.providerStatus.refresh('xai', new AbortController().signal)
+      expect(ctx.providerStatus.lookup('xai')).toMatchObject({
+        kind: 'snapshot',
+        windows: [{ window: '7d', usedPercent: 20, reset: Date.parse('2026-08-27T00:00:00Z') }],
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('refresh on openai-codex reads usage JSON without starting an SSE request', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(ProviderStatus)
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = []
+    ctx.reflect.provide('llmOAuth', {
+      tokens: () => ({
+        read: async () => ({
+          access: 'tok', refresh: '', expires: Date.now() + 60_000,
+          extra: { accountId: 'account-7' },
+        }),
+      }),
+    })
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, init })
+      return new Response(JSON.stringify({
+        rate_limit: {
+          primary_window: { used_percent: 15, limit_window_seconds: 18_000, reset_at: 1_787_743_391 },
+          secondary_window: { used_percent: 3, limit_window_seconds: 604_800, reset_at: 1_788_292_246 },
+        },
+      }), { status: 200 })
+    })
+    try {
+      await ctx.plugin(LlmPiAi, { providers: { 'openai-codex': { auth: 'subscription' } } })
+      await ctx.providerStatus.refresh('openai-codex', new AbortController().signal)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.url).toBe('https://chatgpt.com/backend-api/wham/usage')
+      expect(calls[0]?.init?.method).toBe('GET')
+      expect((calls[0]?.init?.headers as Record<string, string>)['chatgpt-account-id']).toBe('account-7')
+      expect(ctx.providerStatus.lookup('openai-codex')).toMatchObject({
+        kind: 'snapshot',
+        windows: [
+          { window: '5h', usedPercent: 15, reset: 1_787_743_391_000 },
+          { window: '7d', usedPercent: 3, reset: 1_788_292_246_000 },
+        ],
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('contains a throwing SuperGrok billing harvest so /usage still succeeds', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(ProviderStatus)
+    ctx.reflect.provide('llmOAuth', {
+      tokens: () => ({
+        read: async () => ({ access: 'tok', refresh: '', expires: Date.now() + 60_000 }),
+      }),
+    })
+    vi.stubGlobal('fetch', async () => { throw new Error('network down') })
+    try {
+      await ctx.plugin(LlmPiAi, { providers: { xai: { auth: 'subscription' } } })
+      await expect(ctx.providerStatus.refresh('xai', new AbortController().signal)).resolves.toBeUndefined()
+      expect(ctx.providerStatus.lookup('xai')).toBeUndefined()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('refresh is a no-op for an unknown route and for xai without a token', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(ProviderStatus)
+    await ctx.plugin(LlmPiAi, { providers: { deepseek: { apiKeyEnv: 'PI_TEST_KEY' } } })
+    await expect(ctx.providerStatus.refresh('not-a-route', new AbortController().signal)).resolves.toBeUndefined()
+    await expect(ctx.providerStatus.refresh('xai', new AbortController().signal)).resolves.toBeUndefined()
+    expect(ctx.providerStatus.lookup('xai')).toBeUndefined()
   })
 })

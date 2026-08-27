@@ -69,6 +69,8 @@ import { catalogProviderIds, catalogProviderTakesApiKey, catalogProviderTakesOAu
 import { assertServiceable, Config, resolveProfiles } from './config.ts'
 import type { PiAiProviderProfile, ResolvedPiAiProviderProfile } from './config.ts'
 import { discoverModels } from './discovery.ts'
+import { harvestCodexUsage } from './codex-usage.ts'
+import { harvestGrokBilling } from './grok-billing.ts'
 import { normalizeRateLimitHeaders } from './rate-limits.ts'
 
 export { PiAiAdapter } from './adapter.ts'
@@ -85,6 +87,8 @@ export type {
   PiAiThinkingFormat,
   ResolvedPiAiProviderProfile,
 } from './config.ts'
+export { CODEX_USAGE_URL, harvestCodexUsage, parseCodexUsage } from './codex-usage.ts'
+export { GROK_BILLING_URL, harvestGrokBilling, parseGrokBilling } from './grok-billing.ts'
 export { supportedProtocols } from './provider.ts'
 
 export const name = 'llm-pi-ai'
@@ -309,7 +313,13 @@ export function apply(ctx: Context, config: Config): void {
       statusService.recordUnavailable({ ...route, reason: normalized.reason })
       return
     }
-    statusService.recordSnapshot({ ...route, dimensions: normalized.dimensions, windows: normalized.windows })
+    // Omit an empty axis so a later billing harvest (or a later header
+    // observation) does not wipe the other measurement.
+    statusService.recordSnapshot({
+      ...route,
+      ...normalized.dimensions.length === 0 ? {} : { dimensions: normalized.dimensions },
+      ...normalized.windows.length === 0 ? {} : { windows: normalized.windows },
+    })
   }
 
   const adapter = new PiAiAdapter({
@@ -325,6 +335,33 @@ export function apply(ctx: Context, config: Config): void {
       )
     },
   })
+
+  /**
+   * On-demand harvest for `/usage`. Codex plan windows come from its OAuth
+   * usage GET, while SuperGrok weekly percent comes from a billing GET.
+   */
+  const refreshProviderStatus = async (routeId: string, signal: AbortSignal): Promise<void> => {
+    try {
+      if (routeId !== 'openai-codex' && routeId !== 'xai') return
+      const token = await resolveTokens()?.read(routeId)
+      if (token?.access === undefined) return
+      if (routeId === 'openai-codex') {
+        const accountId = typeof token.extra?.accountId === 'string' ? token.extra.accountId : undefined
+        const parsed = await harvestCodexUsage(token.access, signal, accountId)
+        if (parsed === undefined) return
+        ctx.get('providerStatus')?.recordSnapshot({ routeId, windows: parsed.windows })
+        return
+      }
+      const parsed = await harvestGrokBilling(token.access, signal)
+      if (parsed === undefined) return
+      ctx.get('providerStatus')?.recordSnapshot({ routeId, windows: parsed.windows })
+    } catch (_harvestFailure) {
+      // /usage still renders the last stored record.
+    }
+  }
+
+  ctx.inject(['providerStatus'], statusCtx =>
+    statusCtx.providerStatus.registerRefresh(refreshProviderStatus))
   // The full installed catalog is configurable from the moment the plugin
   // mounts — dormant or not — so configuration surfaces can offer every
   // pi-ai provider before any route exists. Hand-declared routes join it as

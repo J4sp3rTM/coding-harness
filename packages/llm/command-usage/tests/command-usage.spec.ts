@@ -5,14 +5,12 @@ import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-test
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import type { CommandResult } from '@deepseek-ai/dsh-commands'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
-import type { TokenMeasurement, TokenMeasurementBaseline } from '@deepseek-ai/dsh-token-meter'
 import {
   createUserMessage,
   LlmAdapter,
   type LlmResolvedModelInfo,
   type Message,
   type StreamChunk,
-  type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -67,24 +65,14 @@ async function seedTurn(agent: Agent, text: string): Promise<void> {
   await agent.whenIdle()
 }
 
-/** One complete measurement fixture carrying only the fields rendering reads. */
-function measurement(baseline: TokenMeasurementBaseline, totalTokens: number): TokenMeasurement {
-  return {
-    logRevision: 0,
-    baseline,
-    surfaceDeltaTokens: 0,
-    totalTokens,
-    surfaceTokens: 0,
-    nodes: [],
-  }
-}
-
 /** Mount a provider-status stand-in answering from one route-keyed record map. */
 function provideProviderStatus(ctx: Context, lookup: (routeId: string) => ProviderStatusRecord | undefined): void {
   ctx.reflect.provide('providerStatus', {
     lookup,
     recordSnapshot: () => {},
     recordUnavailable: () => {},
+    refresh: async () => {},
+    registerRefresh: () => () => {},
   })
 }
 
@@ -108,21 +96,15 @@ describe('/usage', () => {
     const { run } = await boot()
     expect(await run('/usage')).toEqual({
       kind: 'success',
-      text: 'no provider call yet · 0 ctx',
+      text: 'no quota observed',
     })
   })
 
-  it('reports the heuristic price after a turn without provider usage', async () => {
-    const { ctx, agent, run } = await boot()
+  it('still reports no quota after a turn that published no status', async () => {
+    const { agent, run } = await boot()
     await seedTurn(agent, 'please remember the number seven')
-    // The mock adapter logs no usage, so the meter anchors heuristically; the
-    // command/run events a dispatch appends are log-only and never reprice it.
-    const pressure = ctx.tokenMeter.measure(agent.session).totalTokens
-    expect(pressure).toBeGreaterThan(0)
-
     const result = await run('/usage')
-    expect(result).toMatchObject({ kind: 'success' })
-    expect(result?.text).toBe(`no provider call yet (estimated) · ${pressure} ctx`)
+    expect(result).toEqual({ kind: 'success', text: 'no quota observed' })
   })
 
   it('ignores arguments after the command name', async () => {
@@ -134,21 +116,10 @@ describe('/usage', () => {
 })
 
 describe('renderUsage', () => {
-  it('renders disjoint provider input and output counts', () => {
-    const usage: TokenUsage = { inputTokens: 1200, outputTokens: 340 }
-    expect(CommandUsage.renderUsage(measurement({ kind: 'usage', tokens: 1540, usage }, 1540)))
-      .toBe('1200 in / 340 out · 1540 ctx')
+  it('renders no quota when no context facts are supplied', () => {
+    expect(CommandUsage.renderUsage()).toBe('no quota observed')
   })
 
-  it('renders the heuristic notice with current pressure', () => {
-    expect(CommandUsage.renderUsage(measurement({ kind: 'estimated', tokens: 96 }, 96)))
-      .toBe('no provider call yet (estimated) · 96 ctx')
-  })
-
-  it('renders fixed zero pressure without any anchor', () => {
-    expect(CommandUsage.renderUsage(measurement({ kind: 'none', tokens: 0 }, 0)))
-      .toBe('no provider call yet · 0 ctx')
-  })
 
   it('unregisters on plugin disposal (HMR safety)', async () => {
     const { ctx, agent, plugin } = await boot()
@@ -249,23 +220,17 @@ describe('renderUsage allowance and balance segments', () => {
       .toBeUndefined()
   })
 
-  it('leads with plan, then quota, then the session figures and balance', () => {
+  it('leads with plan, then quota, then balance', () => {
     const record = snapshot(
       [{ dimension: 'tokens', limit: 100, remaining: 50 }],
       [{ window: '5h', usedPercent: 20 }],
     )
-    expect(CommandUsage.renderUsage(measurement({ kind: 'none', tokens: 0 }, 0), { status: record, balanceUsd: 3, now: NOW }))
-      .toBe('plan 80% left (5h) · quota 50% tokens left — no provider call yet · 0 ctx · $3.00 left')
+    expect(CommandUsage.renderUsage({ status: record, balanceUsd: 3, now: NOW }))
+      .toBe('plan 80% left (5h) · quota 50% tokens left · $3.00 left')
   })
 
-  it('appends the balance with two-decimal USD formatting and no allowance segment', () => {
-    expect(CommandUsage.renderUsage(measurement({ kind: 'none', tokens: 0 }, 0), { balanceUsd: 12.5 }))
-      .toBe('no provider call yet · 0 ctx · $12.50 left')
-  })
-
-  it('renders the session figures alone when no context facts are supplied', () => {
-    expect(CommandUsage.renderUsage(measurement({ kind: 'estimated', tokens: 96 }, 96), {}))
-      .toBe('no provider call yet (estimated) · 96 ctx')
+  it('renders the balance alone with two-decimal USD formatting', () => {
+    expect(CommandUsage.renderUsage({ balanceUsd: 12.5 })).toBe('$12.50 left')
   })
 })
 
@@ -287,16 +252,29 @@ describe('/usage with optional provider status services', () => {
       }
       : undefined)
     const account = provideDeepSeekAccount(ctx, async provider => provider === 'mock' ? 7 : undefined)
-    const pressure = ctx.tokenMeter.measure(agent.session).totalTokens
 
     const result = await run('/usage')
     expect(result).toMatchObject({ kind: 'success' })
-    expect(result?.text).toBe(
-      'quota 92% tokens left · 98% requests left'
-      + ` — no provider call yet (estimated) · ${pressure} ctx · $7.00 left`,
-    )
+    expect(result?.text).toBe('quota 92% tokens left · 98% requests left · $7.00 left')
     // The capability was asked exactly about the requested route.
     expect(account.asked).toEqual(['mock'])
+  })
+
+  it('asks the status store to refresh the last requested route before lookup', async () => {
+    const { ctx, agent, run } = await boot()
+    await seedTurn(agent, 'anchor a request header on the mock route')
+    const asked: string[] = []
+    ctx.reflect.provide('providerStatus', {
+      lookup: () => undefined,
+      recordSnapshot: () => {},
+      recordUnavailable: () => {},
+      refresh: async (routeId: string, _signal: AbortSignal) => {
+        asked.push(routeId)
+      },
+      registerRefresh: () => () => {},
+    })
+    expect(await run('/usage')).toEqual({ kind: 'success', text: 'no quota observed' })
+    expect(asked).toEqual(['mock'])
   })
 
   it('reports the switched route rather than the Agent\'s creation-time option', async () => {
@@ -330,7 +308,6 @@ describe('/usage with optional provider status services', () => {
   it('leaves the report unchanged for an unavailable or foreign-route record', async () => {
     const { ctx, agent, run } = await boot()
     await seedTurn(agent, 'anchor a request header on the mock route')
-    const pressure = ctx.tokenMeter.measure(agent.session).totalTokens
     // One mutable stand-in: each phase swaps what lookup answers.
     let lookup: (routeId: string) => ProviderStatusRecord | undefined = () => undefined
     provideProviderStatus(ctx, route => lookup(route))
@@ -340,7 +317,7 @@ describe('/usage with optional provider status services', () => {
       ? { kind: 'unavailable', routeId, observedAt: Date.now(), reason: 'unparseable values' }
       : undefined
     const result = await run('/usage')
-    expect(result?.text).toBe(`no provider call yet (estimated) · ${pressure} ctx`)
+    expect(result?.text).toBe('no quota observed')
 
     // A compliant store answers lookups by key, so a record keyed to another
     // route is invisible to this agent's lookup and nothing extra renders.
@@ -354,14 +331,14 @@ describe('/usage with optional provider status services', () => {
         windows: [],
       }
       : undefined
-    expect((await run('/usage'))?.text).toBe(`no provider call yet (estimated) · ${pressure} ctx`)
+    expect((await run('/usage'))?.text).toBe('no quota observed')
   })
 
   it('renders the session figures alone when no optional service is composed', async () => {
     const { run } = await boot()
     expect(await run('/usage')).toEqual({
       kind: 'success',
-      text: 'no provider call yet · 0 ctx',
+      text: 'no quota observed',
     })
   })
 
@@ -379,6 +356,6 @@ describe('/usage with optional provider status services', () => {
     // another session's observation for the declared route stays invisible.
     const bare = ctx.agentLoop.create(SessionId('no-request-agent'), { provider: MODEL, model: MODEL })
     const result = await ctx.commands.execute(bare, '/usage', new AbortController().signal)
-    expect(result?.result?.text).toBe('no provider call yet · 0 ctx')
+    expect(result?.result?.text).toBe('no quota observed')
   })
 })
