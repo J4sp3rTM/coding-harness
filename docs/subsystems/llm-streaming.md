@@ -1052,6 +1052,9 @@ Host-process store of the last status observation per route. One record per rout
  * Commit one quota snapshot as the latest observation for its route.
  * Dimensions and plan windows are validated before anything is stored; a
  * rejected publication leaves the previously stored record serving.
+ * An omitted axis keeps the previous snapshot's values so a header-only
+ * observation and a billing-only harvest can share one record. An explicit
+ * empty array still means this publication observed none.
  * @param publication - the route, optional non-secret credential identity, and parsed quota measurements.
  * @throws when any field is outside its documented domain.
  */
@@ -1073,6 +1076,27 @@ recordUnavailable(publication: ProviderStatusPublication & { /** Why no usable d
  * @returns the frozen latest record, or `undefined` before the first publication.
  */
 lookup(routeId: string): ProviderStatusRecord | undefined
+
+/**
+ * Optional on-demand harvest registered by an adapter. `/usage` calls this
+ * before `lookup` so a route whose ordinary transport never produces HTTP
+ * headers (Codex WebSocket) can still publish a snapshot. Absence is a
+ * no-op: the last stored record, if any, still serves.
+ *
+ * @param routeId - harness provider route to refresh.
+ * @param signal - cancellation owned by the invoking command.
+ */
+async refresh(routeId: string, signal: AbortSignal): Promise<void>
+
+/**
+ * Install the single on-demand harvest. A later registration replaces the
+ * previous function; the returned disposer removes only the function it
+ * installed.
+ *
+ * @param refresher - adapter-owned harvest; failures must stay contained inside it.
+ * @returns disposer that forgets this refresher.
+ */
+registerRefresh( refresher: (routeId: string, signal: AbortSignal) => Promise<void>, ): () => void
 ```
 
 Source: [`packages/llm/provider-status/src/index.ts:113`](../../packages/llm/provider-status/src/index.ts)

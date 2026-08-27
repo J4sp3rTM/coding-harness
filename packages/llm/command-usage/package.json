@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-command-usage",
-  "description": "Human-facing slash command reporting provider token usage and context pressure",
+  "description": "Human-facing slash command reporting provider quota and account balance",
   "version": "0.1.0-rc.12",
   "publishConfig": {
     "access": "public"

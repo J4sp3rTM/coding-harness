@@ -16,10 +16,10 @@ export const inject = ['invariants']
 
 /**
  * No runtime invariant: `/usage` appends nothing to any session log — it reads
- * one measurement and returns text, so it owns no durable relationship worth
- * asserting. Measurement consistency is the token meter's own contract with
- * the session log, and the command/run–command/done lifecycle pairing around
- * each invocation is already validated by the commands package's companion.
+ * optional status services and returns text, so it owns no durable
+ * relationship worth asserting. The command/run–command/done lifecycle pairing
+ * around each invocation is already validated by the commands package's
+ * companion.
  */
 const install: InvariantInstaller = () => {}
 

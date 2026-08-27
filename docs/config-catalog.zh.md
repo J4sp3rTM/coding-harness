@@ -3259,7 +3259,7 @@ export interface Config {
 - `@deepseek-ai/dsh-command-rename` — 需要 `commands` · `sessionTitle`（[`packages/session/command-rename/src/index.ts`](../packages/session/command-rename/src/index.ts)）
 - `@deepseek-ai/dsh-command-skills` — 需要 `commands` · `skills`（[`packages/skill/command-skills/src/index.ts`](../packages/skill/command-skills/src/index.ts)）
 - `@deepseek-ai/dsh-command-status` — 需要 `commands`（[`packages/session/command-status/src/index.ts`](../packages/session/command-status/src/index.ts)）
-- `@deepseek-ai/dsh-command-usage` — 需要 `commands` · `tokenMeter`（[`packages/llm/command-usage/src/index.ts`](../packages/llm/command-usage/src/index.ts)）
+- `@deepseek-ai/dsh-command-usage` — 需要 `commands`（[`packages/llm/command-usage/src/index.ts`](../packages/llm/command-usage/src/index.ts)）
 - `@deepseek-ai/dsh-commands`（[`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts)）
 - `@deepseek-ai/dsh-cordis-client-runner`（[`packages/extensions/cordis-client-runner/src/index.ts`](../packages/extensions/cordis-client-runner/src/index.ts)）
 - `@deepseek-ai/dsh-fs-e2b` — 需要 `e2b`（[`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts)）

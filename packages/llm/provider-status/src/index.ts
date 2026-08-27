@@ -116,6 +116,10 @@ export class ProviderStatus extends Service {
   static Config: z<ProviderStatusConfig> = z.object({})
 
   private readonly records = new Map<string, ProviderStatusRecord>()
+  /** Latest adapter-owned harvest; absent means `refresh` is a no-op. */
+  private refresherRegistration: {
+    refresher: (routeId: string, signal: AbortSignal) => Promise<void>
+  } | undefined
 
   constructor(ctx: Context, config: ProviderStatusConfig = {}) {
     super(ctx, 'providerStatus')
@@ -126,6 +130,9 @@ export class ProviderStatus extends Service {
    * Commit one quota snapshot as the latest observation for its route.
    * Dimensions and plan windows are validated before anything is stored; a
    * rejected publication leaves the previously stored record serving.
+   * An omitted axis keeps the previous snapshot's values so a header-only
+   * observation and a billing-only harvest can share one record. An explicit
+   * empty array still means this publication observed none.
    * @param publication - the route, optional non-secret credential identity, and parsed quota measurements.
    * @throws when any field is outside its documented domain.
    */
@@ -136,8 +143,10 @@ export class ProviderStatus extends Service {
     windows?: readonly ProviderPlanWindowSnapshot[]
   }): void {
     validatePublication(publication)
-    const dimensions = publication.dimensions ?? []
-    const windows = publication.windows ?? []
+    const previous = this.records.get(publication.routeId)
+    const previousSnapshot = previous?.kind === 'snapshot' ? previous : undefined
+    const dimensions = publication.dimensions ?? previousSnapshot?.dimensions ?? []
+    const windows = publication.windows ?? previousSnapshot?.windows ?? []
     if (dimensions.length === 0 && windows.length === 0) {
       throw new Error('provider-status: a snapshot needs at least one quota dimension or plan window')
     }
@@ -190,6 +199,37 @@ export class ProviderStatus extends Service {
    */
   lookup(routeId: string): ProviderStatusRecord | undefined {
     return this.records.get(routeId)
+  }
+
+  /**
+   * Optional on-demand harvest registered by an adapter. `/usage` calls this
+   * before `lookup` so a route whose ordinary transport never produces HTTP
+   * headers (Codex WebSocket) can still publish a snapshot. Absence is a
+   * no-op: the last stored record, if any, still serves.
+   *
+   * @param routeId - harness provider route to refresh.
+   * @param signal - cancellation owned by the invoking command.
+   */
+  async refresh(routeId: string, signal: AbortSignal): Promise<void> {
+    await this.refresherRegistration?.refresher(routeId, signal)
+  }
+
+  /**
+   * Install the single on-demand harvest. A later registration replaces the
+   * previous function; the returned disposer removes only the function it
+   * installed.
+   *
+   * @param refresher - adapter-owned harvest; failures must stay contained inside it.
+   * @returns disposer that forgets this refresher.
+   */
+  registerRefresh(
+    refresher: (routeId: string, signal: AbortSignal) => Promise<void>,
+  ): () => void {
+    const registration = { refresher }
+    this.refresherRegistration = registration
+    return () => {
+      if (this.refresherRegistration === registration) this.refresherRegistration = undefined
+    }
   }
 }
 

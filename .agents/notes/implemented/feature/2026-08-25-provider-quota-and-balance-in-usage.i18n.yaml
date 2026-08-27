@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-25-provider-quota-and-balance-in-usage.md
-2026-08-25-provider-quota-and-balance-in-usage.md: 5ea7073272ec5ecf8717655b6d5c2451e0173345
-2026-08-25-provider-quota-and-balance-in-usage.zh.md: 345622b7694ba71160925d3c717cfa190474c6b2
+2026-08-25-provider-quota-and-balance-in-usage.md: 5cbf7a42591d440d132360df2b0345db90de363d
+2026-08-25-provider-quota-and-balance-in-usage.zh.md: 214e49c935748f76587fc06341964e562d9a8324

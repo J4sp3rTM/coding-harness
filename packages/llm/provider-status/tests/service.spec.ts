@@ -79,6 +79,37 @@ describe('ProviderStatus', () => {
     })
   })
 
+  it('refreshes through the current adapter harvest and tolerates an absent harvest', async () => {
+    const ctx = await mounted()
+    const calls: [string, AbortSignal][] = []
+    const refresh = ctx.providerStatus.registerRefresh((routeId, signal) => {
+      calls.push([routeId, signal])
+      return Promise.resolve()
+    })
+    const signal = new AbortController().signal
+    await ctx.providerStatus.refresh('codex', signal)
+    expect(calls).toEqual([['codex', signal]])
+    refresh()
+    await ctx.providerStatus.refresh('codex', signal)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('does not let an older refresh disposer remove a replacement', async () => {
+    const ctx = await mounted()
+    const calls: string[] = []
+    const firstDispose = ctx.providerStatus.registerRefresh(() => {
+      calls.push('first')
+      return Promise.resolve()
+    })
+    ctx.providerStatus.registerRefresh(() => {
+      calls.push('second')
+      return Promise.resolve()
+    })
+    firstDispose()
+    await ctx.providerStatus.refresh('codex', new AbortController().signal)
+    expect(calls).toEqual(['second'])
+  })
+
   it('replaces the previous record on every publication', async () => {
     const ctx = await mounted()
     ctx.providerStatus.recordSnapshot({ routeId: 'r', dimensions: [dimension()] })
@@ -239,5 +270,47 @@ describe('ProviderStatus', () => {
       expect(() => { ctx.providerStatus.recordUnavailable({ routeId: 'r', reason: '' }) })
         .toThrow(/reason must be a non-empty string/)
     })
+  })
+
+  it('keeps the omitted axis from the previous snapshot', async () => {
+    const ctx = await mounted()
+    ctx.providerStatus.recordSnapshot({ routeId: 'xai', windows: [window()] })
+    ctx.providerStatus.recordSnapshot({ routeId: 'xai', dimensions: [dimension()] })
+    expect(ctx.providerStatus.lookup('xai')).toMatchObject({
+      dimensions: [dimension()],
+      windows: [window()],
+    })
+  })
+
+  it('lets an explicit empty axis clear the previous snapshot values', async () => {
+    const ctx = await mounted()
+    ctx.providerStatus.recordSnapshot({
+      routeId: 'xai',
+      dimensions: [dimension()],
+      windows: [window()],
+    })
+    ctx.providerStatus.recordSnapshot({ routeId: 'xai', windows: [window({ usedPercent: 40 })], dimensions: [] })
+    expect(ctx.providerStatus.lookup('xai')).toMatchObject({
+      dimensions: [],
+      windows: [window({ usedPercent: 40 })],
+    })
+  })
+
+  it('refreshes through the registered harvest and forgets it on dispose', async () => {
+    const ctx = await mounted()
+    const seen: string[] = []
+    const dispose = ctx.providerStatus.registerRefresh(async (routeId) => {
+      seen.push(routeId)
+    })
+    await ctx.providerStatus.refresh('openai-codex', new AbortController().signal)
+    expect(seen).toEqual(['openai-codex'])
+    dispose()
+    await ctx.providerStatus.refresh('openai-codex', new AbortController().signal)
+    expect(seen).toEqual(['openai-codex'])
+  })
+
+  it('treats refresh without a harvest as a no-op', async () => {
+    const ctx = await mounted()
+    await expect(ctx.providerStatus.refresh('xai', new AbortController().signal)).resolves.toBeUndefined()
   })
 })

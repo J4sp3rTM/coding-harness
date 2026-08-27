@@ -1047,7 +1047,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'recordSnapshot(publication: ProviderStatusPublication & { /** Fully parsed dimensions; each named once. */ dimensions?: readonly ProviderQuotaDimensionSnapshot[] /** Subscription allowance windows; each labeled once. */ windows?: readonly ProviderPlanWindowSnapshot[] }): void',
-        description: 'Commit one quota snapshot as the latest observation for its route. Dimensions and plan windows are validated before anything is stored; a rejected publication leaves the previously stored record serving.',
+        description: 'Commit one quota snapshot as the latest observation for its route. Dimensions and plan windows are validated before anything is stored; a rejected publication leaves the previously stored record serving. An omitted axis keeps the previous snapshot\'s values so a header-only observation and a billing-only harvest can share one record. An explicit empty array still means this publication observed none.',
         parameters: [{ name: 'publication', description: 'the route, optional non-secret credential identity, and parsed quota measurements.' }],
         throws: ['when any field is outside its documented domain.'],
       },
@@ -1062,6 +1062,17 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read the latest observation for one route.',
         parameters: [{ name: 'routeId', description: 'harness provider route to look up.' }],
         returns: 'the frozen latest record, or `undefined` before the first publication.',
+      },
+      {
+        signature: 'async refresh(routeId: string, signal: AbortSignal): Promise<void>',
+        description: 'Optional on-demand harvest registered by an adapter. `/usage` calls this before `lookup` so a route whose ordinary transport never produces HTTP headers (Codex WebSocket) can still publish a snapshot. Absence is a no-op: the last stored record, if any, still serves.',
+        parameters: [{ name: 'routeId', description: 'harness provider route to refresh.' }, { name: 'signal', description: 'cancellation owned by the invoking command.' }],
+      },
+      {
+        signature: 'registerRefresh( refresher: (routeId: string, signal: AbortSignal) => Promise<void>, ): () => void',
+        description: 'Install the single on-demand harvest. A later registration replaces the previous function; the returned disposer removes only the function it installed.',
+        parameters: [{ name: 'refresher', description: 'adapter-owned harvest; failures must stay contained inside it.' }],
+        returns: 'disposer that forgets this refresher.',
       },
     ],
   },
