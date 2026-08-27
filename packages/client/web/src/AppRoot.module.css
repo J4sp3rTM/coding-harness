@@ -71,6 +71,6 @@
   border: 1px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%));
   border-radius: 6px;
   color: var(--dsw-alias-label-primary, #0f1115);
-  background: var(--dsw-alias-bg-elevated, #fff);
+  background: var(--dsw-alias-bg-layer-2, #fff);
   cursor: pointer;
 }
