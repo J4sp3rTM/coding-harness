@@ -47,6 +47,118 @@ function state(overrides: Partial<ModelDirectoryState> = {}): ModelDirectoryStat
 
 afterEach(cleanup)
 
+describe('ModelSelect model filtering', () => {
+  const groups = [{
+    id: 'deepseek-official',
+    name: 'DeepSeek',
+    models: [
+      { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash' },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+    ],
+  }, {
+    id: 'open-router',
+    name: 'Open Router',
+    models: [
+      { id: 'qwen3-coder', name: 'Qwen3 Coder' },
+      { id: 'llama-4', name: 'Llama 4' },
+    ],
+  }]
+
+  function renderSelector() {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({ groups }))
+    const view = render(<ModelSelect
+      locked={false}
+      available
+      directory={directory}
+      load={vi.fn()}
+      select={vi.fn().mockResolvedValue(true)}
+      t={t}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: /Select model/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Model/ }))
+    return view
+  }
+
+  it('opens the model pane with a prominent focused search field', () => {
+    renderSelector()
+    const search = screen.getByRole('searchbox', { name: 'Search models' })
+    expect(document.activeElement).toBe(search)
+    expect(search.getAttribute('placeholder')).toBe('Search models')
+    fireEvent.change(search, { target: { value: 'deep' } })
+    expect(screen.getByText('DeepSeek')).toBeTruthy()
+    expect(screen.queryByText('Open Router')).toBeNull()
+  })
+
+  it('filters by provider or model metadata from the search field', () => {
+    renderSelector()
+    const search = screen.getByRole('searchbox', { name: 'Search models' })
+    fireEvent.change(search, { target: { value: 'deep' } })
+    expect(screen.getByText('DeepSeek')).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash' })).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: 'DeepSeek-V4-Pro' })).toBeTruthy()
+    expect(screen.queryByText('Open Router')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Select model/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Select model/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Model/ }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search models' }), { target: { value: 'qwen3' } })
+    expect(screen.getByText('Open Router')).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: 'Qwen3 Coder' })).toBeTruthy()
+    expect(screen.queryByRole('menuitemradio', { name: 'Llama 4' })).toBeNull()
+  })
+
+  it('edits the search, focuses visible rows, and reports localized no-results', () => {
+    renderSelector()
+    const search = screen.getByRole('searchbox', { name: 'Search models' })
+    fireEvent.change(search, { target: { value: 'QWE' } })
+    expect(search).toHaveProperty('value', 'QWE')
+    fireEvent.change(search, { target: { value: 'QW' } })
+    fireEvent.keyDown(search, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { name: 'Qwen3 Coder' }))
+    if (!(document.activeElement instanceof HTMLElement)) throw new Error('Model row did not receive focus')
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { name: 'Qwen3 Coder' }))
+
+    fireEvent.change(search, { target: { value: 'QWmissing' } })
+    expect(screen.getByText('No models match “QWmissing”.')).toBeTruthy()
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+  })
+
+  it('accepts spaces as normal search input', () => {
+    renderSelector()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search models' }), {
+      target: { value: 'open router' },
+    })
+    expect(screen.getByRole('menuitemradio', { name: 'Qwen3 Coder' })).toBeTruthy()
+    expect(screen.queryByText('DeepSeek')).toBeNull()
+  })
+
+  it('clears the search when closed and leaves the root pane unchanged', () => {
+    renderSelector()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search models' }), { target: { value: 'deep' } })
+    fireEvent.click(screen.getByRole('button', { name: /Select model/ }))
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Select model/ }))
+    expect(screen.queryByRole('searchbox')).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: /Model/ }))
+    expect(screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search models' }).value).toBe('')
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(4)
+  })
+
+  it('clears the search when an outside click closes the menu', () => {
+    renderSelector()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search models' }), { target: { value: 'deep' } })
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Select model/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Model/ }))
+    expect(screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search models' }).value).toBe('')
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(4)
+  })
+})
+
 describe('ModelSelect reasoning effort', () => {
   it('renders adapter metadata and submits the effort as part of the session selection', async () => {
     const directory = createSnapshotStore<ModelDirectoryState>(state())
@@ -68,6 +180,7 @@ describe('ModelSelect reasoning effort', () => {
     })
     fireEvent.click(trigger)
     fireEvent.click(screen.getByRole('menuitem', { name: /Effort/ }))
+    expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { name: 'Off' }))
     expect(screen.getAllByRole('menuitemradio').map(item => item.textContent))
       .toEqual(['Off', 'High', 'MaxLargest budget'])
 

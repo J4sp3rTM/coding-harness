@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -24,6 +25,10 @@ import type { RpcRequest, RpcResponse } from '../src/api/rpc.ts'
 import { RpcId } from '../src/api/rpc.ts'
 import { AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-agent-default-model'
 import { createApiProxy } from '../src/api-proxy.ts'
+import {
+  installModelProviderPriority,
+  MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE,
+} from '../src/provider-priority.ts'
 
 const DEFAULTS = { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' }
 
@@ -618,14 +623,15 @@ describe('credentials domain', () => {
 })
 
 describe('llm domain', () => {
-  it('merges the configurable directory with live routes and appends undeclared ones', async () => {
+  it('uses configurable directory order for providers and model catalogs, then appends undeclared routes', async () => {
     const ctx = await harness({ configurableProviders: false })
     ctx.llm.registerConfigurableProviders([
       { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [] },
       { provider: 'openai', displayName: 'openai', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'] },
     ])
-    ctx.llm.registerAdapter(['deepseek-official'], new CatalogAdapter('DeepSeek', ['deepseek-v4-flash']))
+    // Registration order intentionally differs from the directory order.
     ctx.llm.registerAdapter(['undeclared'], new CatalogAdapter('Undeclared', ['u-1']))
+    ctx.llm.registerAdapter(['deepseek-official'], new CatalogAdapter('DeepSeek', ['deepseek-v4-flash']))
     // Only one namespace can answer an interrogation, so the flag follows the
     // entry's namespace rather than being assumed for every row.
     ctx.llm.registerModelDiscovery('llm-pi-ai', () => Promise.resolve([]))
@@ -638,6 +644,20 @@ describe('llm domain', () => {
       // interrogated on its behalf either.
       { provider: 'undeclared', displayName: 'Undeclared', settingsNs: '', settingsPath: [], active: true },
     ])
+    expect(expectOk(await api.llm.models(request({}))).groups.map(group => group.id))
+      .toEqual(['deepseek-official', 'undeclared'])
+
+    const session = ctx.sessions.create()
+    const agent = {
+      id: session.id,
+      session,
+      status: 'running',
+      ctx,
+      inbox: { nextTurn: [], nextStep: [] },
+    } as unknown as Agent
+    ctx.agents.register(agent)
+    expect(expectOk(await api.sessions.models(request({ sessionId: session.id }))).groups.map(group => group.id))
+      .toEqual(['deepseek-official', 'undeclared'])
   })
 
   it('serves the host-scoped catalog with per-provider failures contained', async () => {
@@ -655,6 +675,89 @@ describe('llm domain', () => {
       ],
     }])
     expect(value.failures).toEqual([{ id: 'broken', name: 'Broken', message: 'catalog backend down' }])
+  })
+
+  it('applies the durable partial provider priority to provider and model catalogs', async () => {
+    const ctx = await harness({ configurableProviders: false })
+    installModelProviderPriority(ctx)
+    await vi.waitFor(() => {
+      expect(ctx.settings.get(MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE)).toEqual({})
+    })
+    ctx.llm.registerConfigurableProviders([
+      { provider: 'openai', displayName: 'OpenAI', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'] },
+      { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [] },
+    ])
+    // Registration order intentionally differs from the directory order.
+    ctx.llm.registerAdapter(['deepseek-official'], new CatalogAdapter('DeepSeek', ['first', 'second']))
+    ctx.llm.registerAdapter(['undeclared'], new CatalogAdapter('Undeclared', ['only']))
+    ctx.llm.registerAdapter(['openai'], new CatalogAdapter('OpenAI', ['openai-model']))
+    const api = createApiProxy(ctx, DEFAULTS)
+
+    expect(expectOk(await api.llm.providers(request({}))).providers.map(provider => provider.provider))
+      .toEqual(['openai', 'deepseek-official', 'undeclared'])
+    expect(expectOk(await api.llm.models(request({}))).groups.map(group => group.id))
+      .toEqual(['openai', 'deepseek-official', 'undeclared'])
+
+    const session = ctx.sessions.create()
+    const agent = {
+      id: session.id,
+      session,
+      status: 'running',
+      ctx,
+      inbox: { nextTurn: [], nextStep: [] },
+    } as unknown as Agent
+    ctx.agents.register(agent)
+
+    const changed = expectOk(await api.settings.mutate(request({
+      ns: String(MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE),
+      ops: [{ op: 'set', path: ['providers'], value: ['undeclared', 'deepseek-official'] }],
+    })))
+    expect(changed.value).toEqual({ providers: ['undeclared', 'deepseek-official'] })
+    expect(expectOk(await api.llm.providers(request({}))).providers.map(provider => provider.provider))
+      .toEqual(['undeclared', 'deepseek-official', 'openai'])
+    const ordered = expectOk(await api.llm.models(request({})))
+    expect(ordered.groups.map(group => group.id)).toEqual(['undeclared', 'deepseek-official', 'openai'])
+    expect(ordered.groups[1]!.models.map(model => model.id)).toEqual(['first', 'second'])
+    const sessionOrdered = expectOk(await api.sessions.models(request({ sessionId: session.id })))
+    expect(sessionOrdered.groups.map(group => group.id)).toEqual(['undeclared', 'deepseek-official', 'openai'])
+
+    const restored = expectOk(await api.settings.mutate(request({
+      ns: String(MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE),
+      ops: [{ op: 'unset', path: ['providers'] }],
+    })))
+    expect(restored.value).toEqual({})
+    expect(expectOk(await api.llm.providers(request({}))).providers.map(provider => provider.provider))
+      .toEqual(['openai', 'deepseek-official', 'undeclared'])
+    expect(expectOk(await api.llm.models(request({}))).groups.map(group => group.id))
+      .toEqual(['openai', 'deepseek-official', 'undeclared'])
+  })
+
+  it('rejects empty and duplicate provider priority ids before storing them', async () => {
+    const ctx = await harness()
+    installModelProviderPriority(ctx)
+    await vi.waitFor(() => {
+      expect(ctx.settings.get(MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE)).toEqual({})
+    })
+    const api = createApiProxy(ctx, DEFAULTS)
+    for (const providers of [[''], [' ', 'openai'], [' openai '], ['duplicate', 'duplicate']]) {
+      const error = expectErr(await api.settings.mutate(request({
+        ns: String(MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE),
+        ops: [{ op: 'set', path: ['providers'], value: providers }],
+      })))
+      expect(error.code).toBe('settings-rejected')
+    }
+    expect(expectOk(await api.settings.describe(request({}))).namespaces
+      .find(namespace => namespace.ns === String(MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE))?.value).toEqual({})
+  })
+
+  it('disposes the priority namespace with its Host owner fiber', async () => {
+    const ctx = await harness()
+    const owner = installModelProviderPriority(ctx)
+    await vi.waitFor(() => {
+      expect(ctx.settings.get(MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE)).toEqual({})
+    })
+    await owner.dispose()
+    expect(ctx.settings.get(MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE)).toBeUndefined()
   })
 
   it('forwards llm/adapters-updated at every topology commit point', async () => {

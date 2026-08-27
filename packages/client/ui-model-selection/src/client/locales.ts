@@ -24,6 +24,8 @@ export const en = {
   'error.action': 'Model operation failed: {message}',
   'action.reload': 'Reload',
   'warning.groupLoad': '{name} failed to load: {message}',
+  'filter.search': 'Search models',
+  'filter.noResults': 'No models match “{query}”.',
   'empty.models': 'No models available.',
   'blocked.composer': 'This model is unavailable — select one to continue',
   'empty.efforts': 'This model provides no reasoning effort levels.',

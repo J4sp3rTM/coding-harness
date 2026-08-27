@@ -108,6 +108,7 @@ import {
   inspectApiRemoteSession,
 } from '@deepseek-ai/dsh-api-remotes'
 import { canOpenNativePath, openNativePath, openNativeTextFile } from './native-path-opener.ts'
+import { prioritizeProviders, readModelProviderPriority } from './provider-priority.ts'
 
 /** Page size when history is called without maxMessages. */
 const DEFAULT_MAX_MESSAGES = 50
@@ -287,6 +288,27 @@ function ok<T>(request: RpcRequest<unknown>, value: T): RpcResponse<T> {
 }
 
 /**
+ * List registered routes in the configurable directory's declaration order,
+ * followed by routes no directory entry names in registration order.
+ */
+function modelCatalogProviders(ctx: Context) {
+  const registered = ctx.llm.listProviders()
+  const byId = new Map(registered.map(provider => [provider.id, provider] as const))
+  const directory = ctx.llm.listConfigurableProviders()
+  const declared = new Set(directory.map(entry => entry.provider))
+  const source = directory.flatMap((entry) => {
+    const provider = byId.get(entry.provider)
+    return provider === undefined ? [] : [provider]
+  })
+  source.push(...registered.filter(provider => !declared.has(provider.id)))
+  return prioritizeProviders(
+    source,
+    readModelProviderPriority(ctx.get('settings')),
+    provider => provider.id,
+  )
+}
+
+/**
  * Build the provider/model catalog over every registered route. Shared by the
  * session-scoped `session.models` and host-scoped `llm.models`. Catalog
  * membership stays advisory: an unlisted session selection remains valid for
@@ -298,7 +320,7 @@ async function buildModelCatalog(ctx: Context): Promise<{
   groups: ModelProviderGroup[]
   failures: ModelCatalogFailure[]
 }> {
-  const catalog = await Promise.all(ctx.llm.listProviders().map(async (provider) => {
+  const catalog = await Promise.all(modelCatalogProviders(ctx).map(async (provider) => {
     try {
       const models = await ctx.llm.listModels(provider.id)
       const entries = await Promise.all(models.map(async (model) => {
@@ -3331,7 +3353,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             active: true,
           })
         }
-        return Promise.resolve(ok(request, { providers: views }))
+        return Promise.resolve(ok(request, {
+          providers: prioritizeProviders(
+            views,
+            readModelProviderPriority(ctx.get('settings')),
+            provider => provider.provider,
+          ),
+        }))
       },
 
       async models(request) {
