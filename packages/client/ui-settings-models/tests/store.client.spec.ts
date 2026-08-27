@@ -1,7 +1,9 @@
 /** Page-store join: directory × namespaces × credentials, with last-good rows on failure. */
 import { describe, expect, it } from 'vitest'
 import type { RpcResponse } from '@deepseek-ai/dsh-api-remotes/client'
-import { messageOf, ModelsSettingsStore } from '../src/client/store.ts'
+import {
+  activeConfiguredProviderRows, hasProviderPriority, messageOf, ModelsSettingsStore,
+} from '../src/client/store.ts'
 
 let nextRpc = 0
 function ok<T>(value: T): RpcResponse<T> {
@@ -116,6 +118,17 @@ describe('ModelsSettingsStore', () => {
     expect(byProvider.get('anthropic')?.apiKeyEnv).toBeUndefined()
     expect(byProvider.get('ghost')).toMatchObject({ configured: false, removable: false })
     expect(state.namespaces.get('llm-pi-ai')?.ns).toBe('llm-pi-ai')
+    expect(activeConfiguredProviderRows(state.rows).map(row => row.entry.provider)).toEqual([
+      'deepseek-official', 'openai',
+    ])
+  })
+
+  it('recognizes a user-owned provider priority list without treating an empty list as absent', () => {
+    const base = { ...NAMESPACES[0]!, ns: 'llm-provider-priority', value: {} }
+    expect(hasProviderPriority(base)).toBe(false)
+    expect(hasProviderPriority({ ...base, user: { providers: [] } })).toBe(true)
+    expect(hasProviderPriority({ ...base, user: { other: true } })).toBe(false)
+    expect(hasProviderPriority({ ...base, user: ['not-an-object'] })).toBe(false)
   })
 
   it('retains successful model groups and exposes provider-local catalog failures', async () => {

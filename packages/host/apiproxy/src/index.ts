@@ -4,8 +4,9 @@
  * carrier pair (fetch/: toFetchHandler on the host side, AbstractApiClient +
  * platform subclasses on the client side), and the host-side implementation
  * (api-proxy.ts: createApiProxy + the ApiProxyService gateway plugin providing
- * `ctx.apiProxy`). Transport-agnostic by design: this package registers no
- * routes — physical carriers wrap `ctx.apiProxy` themselves.
+ * `ctx.apiProxy`). When settings are composed, the gateway also registers the
+ * Host-wide `llm-provider-priority` section. Transport-agnostic by design: this
+ * package registers no routes — physical carriers wrap `ctx.apiProxy` themselves.
  *
  * The gateway consumes `ctx.agentDefaultModel`, the transport-independent default
  * shared with direct entry points. Switching models persists through that
@@ -17,6 +18,7 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type { ApiProxy } from './api/index.ts'
 import { createApiProxy, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './api-proxy.ts'
+import { installModelProviderPriority } from './provider-priority.ts'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
   type SessionLogCompressionLevel,
@@ -63,8 +65,9 @@ export interface Config {
 
 /**
  * The API gateway service: implements the ApiProxy contract over the composed
- * host context and provides it as `ctx.apiProxy`. The Host cwd is the default
- * project directory.
+ * host context and provides it as `ctx.apiProxy`. When a settings provider is
+ * composed, it owns the `llm-provider-priority` namespace used by model/provider
+ * catalog responses. The Host cwd is the default project directory.
  */
 export class ApiProxyService extends Service implements ApiProxy {
   static inject = [
@@ -122,6 +125,7 @@ export class ApiProxyService extends Service implements ApiProxy {
     // createApiProxy returns closures (no `this` capture), so the bind is
     // behavior-neutral.
     this.respond = api.respond.bind(api)
+    installModelProviderPriority(ctx)
   }
 }
 

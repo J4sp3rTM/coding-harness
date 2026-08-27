@@ -4,46 +4,46 @@
     - button "General":
       - img
       - text: General
-    - button "Model":
+    - button "Models":
       - img
-      - text: Model
-    - button "插件":
+      - text: Models
+    - button "Plugins":
       - img
-      - text: 插件
-    - button "Agent 预设":
+      - text: Plugins
+    - button "Agent presets":
       - img
-      - text: Agent 预设
+      - text: Agent presets
   - button "Open configuration file"
   - button "Close":
     - img
     - text: Close
-  - heading "Model" [level=2]
-  - paragraph: 填入各提供方的 API 密钥即可使用其Model。
-  - region "开发 agent 分级":
-    - heading "开发 agent 分级" [level=3]
-    - paragraph: 父级／SessionsModel仍在编排器中选择。这些路由只用于委派工作和审查。
-    - text: T1 —— 特殊审查
-    - combobox "T1 —— 特殊审查":
-      - option "继承父级Model" [selected]
-    - combobox "T1 —— 特殊审查 · Effort" [disabled]:
-      - option "提供方默认Effort" [selected]
-    - paragraph: 用于 frontier 或特殊审查；只会提升委派的审查工作。
-    - text: T2 —— 实现与检查
-    - combobox "T2 —— 实现与检查":
-      - option "继承父级Model" [selected]
-    - combobox "T2 —— 实现与检查 · Effort" [disabled]:
-      - option "提供方默认Effort" [selected]
-    - paragraph: 用于普通实现、检查和验证。
-    - text: T3 —— 简单且低风险
-    - combobox "T3 —— 简单且低风险":
-      - option "继承父级Model" [selected]
-    - combobox "T3 —— 简单且低风险 · Effort" [disabled]:
-      - option "提供方默认Effort" [selected]
-    - paragraph: 用于简单、重复且低风险的工作。
-    - button "Save分级" [disabled]
+  - heading "Models" [level=2]
+  - paragraph: Enter your API keys to use models from the following providers.
+  - region "Development agent tiers":
+    - heading "Development agent tiers" [level=3]
+    - paragraph: The parent/session model remains selected in the composer. These routes apply only to delegated work and review.
+    - text: T1 — Exceptional review
+    - combobox "T1 — Exceptional review":
+      - option "Inherit parent model" [selected]
+    - combobox "T1 — Exceptional review · Reasoning effort" [disabled]:
+      - option "Provider default effort" [selected]
+    - paragraph: Use for frontier or exceptional review; it only escalates delegated review.
+    - text: T2 — Implementation and inspection
+    - combobox "T2 — Implementation and inspection":
+      - option "Inherit parent model" [selected]
+    - combobox "T2 — Implementation and inspection · Reasoning effort" [disabled]:
+      - option "Provider default effort" [selected]
+    - paragraph: Use for ordinary implementation, inspection, and validation.
+    - text: T3 — Simple and low-risk
+    - combobox "T3 — Simple and low-risk":
+      - option "Inherit parent model" [selected]
+    - combobox "T3 — Simple and low-risk · Reasoning effort" [disabled]:
+      - option "Provider default effort" [selected]
+    - paragraph: Use for simple, repetitive, and low-risk work.
+    - button "Save tiers" [disabled]
   - list
-  - text: 提供方
-  - combobox "提供方":
+  - text: Provider
+  - combobox "Provider":
     - option "amazon-bedrock"
     - option "ant-ling"
     - option "anthropic"
@@ -83,9 +83,9 @@
     - option "xiaomi-token-plan-sgp"
     - option "zai"
     - option "zai-coding-cn"
-  - text: API 密钥
-  - textbox "API 密钥":
-    - /placeholder: Input API 密钥，或留空使用环境认证
-  - group: 自定义Settings
+  - text: API key
+  - textbox "API key":
+    - /placeholder: Enter an API key, or leave blank to use environment authentication
+  - group: Customized settings
   - button "Cancel"
-  - button "Save"
+  - button "Apply"

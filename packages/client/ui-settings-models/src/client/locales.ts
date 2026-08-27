@@ -114,6 +114,16 @@ export const en = {
   tierSaved: 'Development agent tiers saved.',
   tierApply: 'Save tiers',
   tierApplying: 'Saving tiers…',
+  providerOrderTitle: 'Provider order',
+  providerOrderIntro: 'Drag active providers or use the move buttons to choose the order used by model lists and new selections.',
+  providerOrderList: 'Active provider order',
+  moveProviderUp: 'Move {provider} up',
+  moveProviderDown: 'Move {provider} down',
+  providerOrderRestore: 'Restore default order',
+  providerOrderApply: 'Save provider order',
+  providerOrderApplying: 'Saving provider order…',
+  providerOrderSaved: 'Provider order saved.',
+  providerOrderConflict: 'Someone else changed provider order while this card was open. Close it and reopen to edit the current values.',
 }
 
 /** The settings.models namespace key union. */

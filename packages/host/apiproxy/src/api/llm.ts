@@ -34,17 +34,22 @@ export interface ConfigurableProviderView {
 /** Llm-domain unary methods (the map keys llm.* of RpcMethodMap). */
 export interface LlmApi {
   /**
-   * List every configurable provider with its live/dormant state, in
-   * directory declaration order. Routes registered outside the directory
-   * (an adapter that never declared configurability) are appended with their
-   * registration identity and no settings address.
+   * List every configurable provider with its live/dormant state, in Host
+   * provider-priority order when configured; otherwise use directory
+   * declaration order. Routes registered outside the directory (an adapter
+   * that never declared configurability) are appended with their registration
+   * identity and no settings address. Model order is provider-owned.
    */
   providers(request: RpcRequest<{}>): Promise<RpcResponse<{ providers: ConfigurableProviderView[] }>>
 
   /**
    * Host-scoped model catalog over every registered provider route: the
-   * settings surface's models view, needing no session. Per-provider listing
-   * failures ride `failures` without failing the sound groups.
+   * settings surface's models view, needing no session. Provider groups follow
+   * Host provider-priority order when configured; otherwise they follow
+   * configurable-provider directory declaration order, with routes outside the
+   * directory appended in registration order. Each provider's model order
+   * comes from its adapter. Per-provider listing failures ride `failures`
+   * without failing the sound groups.
    */
   models(request: RpcRequest<{}>): Promise<RpcResponse<{ groups: ModelProviderGroup[]; failures: ModelCatalogFailure[] }>>
 

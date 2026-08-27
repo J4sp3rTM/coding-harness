@@ -15,6 +15,7 @@ import {
 } from '../src/client/DeepSeekModelsEditor.tsx'
 import { apiKeyFailure } from '../src/client/apiKey.ts'
 import { deriveKeyRef, ModelsSettingsStore } from '../src/client/store.ts'
+import { ProviderOrderEditor } from '../src/client/ProviderOrderEditor.tsx'
 import type { ProviderRow } from '../src/client/store.ts'
 import { en } from '../src/client/locales.ts'
 
@@ -241,6 +242,35 @@ async function mountFirstRun(overrides: Parameters<typeof scriptedFace>[0] = {})
   return mountFace(scripted)
 }
 
+function providerPriorityNamespace(revision = 7, user: unknown = { providers: ['deepseek-official', 'openai'] }): SettingsNamespaceView {
+  return {
+    ns: 'llm-provider-priority', schema: {}, value: user === undefined ? {} : user,
+    user, applies: 'live', secrets: [], revision,
+  }
+}
+
+async function mountOrderEditor(
+  overrides: Parameters<typeof scriptedFace>[0] = {},
+  namespace = providerPriorityNamespace(),
+  writable = true,
+) {
+  const scripted = scriptedFace(overrides)
+  const controller = new ModelsSettingsStore(scripted.face as unknown as WireFace)
+  await controller.load()
+  const state = controller.store.getSnapshot()
+  const view = render(
+    <ProviderOrderEditor
+      rows={state.rows}
+      namespace={namespace}
+      writable={writable}
+      api={scripted.face as never}
+      controller={controller}
+      t={t}
+    />,
+  )
+  return { ...scripted, controller, view }
+}
+
 /**
  * Mount and open the DeepSeek editor. The shared fixture already has a usable
  * openai route, so DeepSeek is an ordinary row whose card opens through Edit
@@ -253,6 +283,123 @@ async function mountDeepSeekCard(overrides: Parameters<typeof scriptedFace>[0] =
 }
 
 describe('ModelsSection', () => {
+  it('shows only configured active providers and saves keyboard reordering with the namespace revision', async () => {
+    const scripted = await mountOrderEditor()
+    expect(screen.getByRole('list', { name: en.providerOrderList }).textContent).toContain('DeepSeek')
+    expect(screen.getByRole('list', { name: en.providerOrderList }).textContent).toContain('openai')
+    expect(screen.queryByText('anthropic')).toBeNull()
+    expect(screen.queryByText('zombie')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move openai up' }))
+    fireEvent.click(screen.getByRole('button', { name: en.providerOrderApply }))
+    await waitFor(() => { expect(scripted.mutate).toHaveBeenCalledTimes(1) })
+    expect(scripted.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      ns: 'llm-provider-priority', expectedRevision: 7,
+      ops: [{ op: 'set', path: ['providers'], value: ['openai', 'deepseek-official'] }],
+    }))
+  })
+
+  it('supports native drag-and-drop and keeps the staged order after a conflict', async () => {
+    const scripted = await mountOrderEditor({
+      mutate: vi.fn(() => Promise.resolve(fail('priority changed', 'settings-conflict'))),
+    })
+    const list = screen.getByRole('list', { name: en.providerOrderList })
+    const rows = within(list).getAllByRole('listitem')
+    const dataTransfer = { effectAllowed: '', setData: vi.fn(), getData: vi.fn(() => 'deepseek-official') }
+    fireEvent.dragStart(rows[0]!, { dataTransfer })
+    fireEvent.drop(rows[1]!, { dataTransfer })
+    expect(within(list).getAllByRole('listitem')[0]?.textContent).toContain('openai')
+    fireEvent.click(screen.getByRole('button', { name: en.providerOrderApply }))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toContain(en.providerOrderConflict) })
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(scripted.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      expectedRevision: 7, ops: [{ op: 'set', path: ['providers'], value: ['openai', 'deepseek-official'] }],
+    }))
+  })
+
+  it('reports ordinary write failures while leaving the staged order editable', async () => {
+    await mountOrderEditor({
+      mutate: vi.fn(() => Promise.resolve(fail('settings storage is unavailable'))),
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Move openai up' }))
+    fireEvent.click(screen.getByRole('button', { name: en.providerOrderApply }))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('settings storage is unavailable') })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: en.providerOrderApply }).disabled).toBe(false)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('keeps restore disabled without a saved preference and ignores no-op or unknown drops', async () => {
+    await mountOrderEditor({}, providerPriorityNamespace(7, {}))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: en.providerOrderRestore }).disabled).toBe(true)
+    const list = screen.getByRole('list', { name: en.providerOrderList })
+    const rows = within(list).getAllByRole('listitem')
+    const dataTransfer = { effectAllowed: '', setData: vi.fn(), getData: vi.fn(() => 'missing') }
+    fireEvent.dragStart(rows[0]!, { dataTransfer })
+    fireEvent.dragOver(rows[1]!, { dataTransfer })
+    fireEvent.dragOver(rows[0]!, { dataTransfer })
+    fireEvent.dragEnd(rows[0]!)
+    fireEvent.drop(rows[0]!, { dataTransfer: { getData: vi.fn(() => 'deepseek-official') } })
+    fireEvent.drop(rows[1]!, { dataTransfer })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: en.providerOrderApply }).disabled).toBe(true)
+  })
+
+  it('appends a newly active route and prunes a removed route without losing a dirty order', async () => {
+    const mounted = await mountOrderEditor()
+    fireEvent.click(screen.getByRole('button', { name: 'Move openai up' }))
+    const currentRows = mounted.controller.store.getSnapshot().rows
+    const addedRow = {
+      ...currentRows[0]!,
+      entry: { ...currentRows[0]!.entry, provider: 'new-route', displayName: 'New route' },
+      configured: true,
+    }
+    const renderOrder = (rows: typeof currentRows): void => {
+      mounted.view.rerender(
+        <ProviderOrderEditor
+          rows={rows}
+          namespace={providerPriorityNamespace()}
+          writable
+          api={mounted.face as never}
+          controller={mounted.controller}
+          t={t}
+        />,
+      )
+    }
+    renderOrder([...currentRows, addedRow])
+    await waitFor(() => { expect(within(screen.getByRole('list', { name: en.providerOrderList })).getAllByRole('listitem')).toHaveLength(3) })
+    renderOrder([currentRows[0]!, addedRow])
+    await waitFor(() => { expect(within(screen.getByRole('list', { name: en.providerOrderList })).getAllByRole('listitem')).toHaveLength(2) })
+    expect(screen.getByRole('list', { name: en.providerOrderList }).textContent).toContain('New route')
+    expect(screen.getByRole('list', { name: en.providerOrderList }).textContent).not.toContain('openai')
+  })
+
+  it('disables every order write and move control for a read-only settings document', async () => {
+    await mountOrderEditor({}, providerPriorityNamespace(), false)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Move openai up' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: en.providerOrderRestore }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: en.providerOrderApply }).disabled).toBe(true)
+  })
+
+  it('reports a transport failure without marking the order saved', async () => {
+    const scripted = await mountOrderEditor({
+      mutate: vi.fn(() => Promise.reject(new Error('connection lost'))),
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Move openai up' }))
+    fireEvent.click(screen.getByRole('button', { name: en.providerOrderApply }))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('connection lost') })
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(scripted.mutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores the default order by unsetting the user priority preference', async () => {
+    const scripted = await mountOrderEditor()
+    fireEvent.click(screen.getByRole('button', { name: en.providerOrderRestore }))
+    await waitFor(() => { expect(scripted.mutate).toHaveBeenCalledTimes(1) })
+    expect(scripted.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      ns: 'llm-provider-priority', expectedRevision: 7,
+      ops: [{ op: 'unset', path: ['providers'] }],
+    }))
+  })
+
   it('joins OAuth/live model groups, keeps stale configured routes, and shows provider failures', async () => {
     const scripted = scriptedFace()
     scripted.face.settings.describe.mockResolvedValue(ok({

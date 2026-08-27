@@ -19,6 +19,9 @@ import { getPath, hasPath, nodeAtPath, rehydrateSchema } from '@deepseek-ai/dsh-
  */
 const PROBE_ROUTE = '\u0000probe'
 
+/** Host settings namespace that stores the optional provider priority list. */
+export const MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE = 'llm-provider-priority'
+
 /** One provider row the page renders. */
 export interface ProviderRow {
   /** The directory entry (route id, display name, settings address, live state). */
@@ -31,6 +34,29 @@ export interface ProviderRow {
   apiKeyEnv: string | undefined
   /** Credential state for {@link apiKeyEnv}, once described. */
   credential: CredentialView | undefined
+}
+
+/**
+ * Select the provider rows that the Models page permits the user to order.
+ * Host response order is already the effective priority order, so this filter
+ * preserves that order while excluding dormant and unconfigured routes.
+ * @param rows - joined provider rows from the page snapshot.
+ * @returns configured routes that are currently registered with an adapter.
+ */
+export function activeConfiguredProviderRows(rows: readonly ProviderRow[]): ProviderRow[] {
+  return rows.filter(row => row.configured && row.entry.active)
+}
+
+/**
+ * Whether the priority namespace has a user-owned list to restore.
+ * @param namespace - Host descriptor for `llm-provider-priority`.
+ * @returns true when the user layer contains the `providers` list.
+ */
+export function hasProviderPriority(namespace: SettingsNamespaceView | undefined): boolean {
+  if (namespace === undefined || typeof namespace.user !== 'object' || namespace.user === null || Array.isArray(namespace.user)) {
+    return false
+  }
+  return Array.isArray((namespace.user as { providers?: unknown }).providers)
 }
 
 /** Page snapshot. */

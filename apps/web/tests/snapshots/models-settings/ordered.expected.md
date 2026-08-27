@@ -41,8 +41,27 @@
       - option "Provider default effort" [selected]
     - paragraph: Use for simple, repetitive, and low-risk work.
     - button "Save tiers" [disabled]
-  - status: Saved minimax-cn.
+  - region "Provider order":
+    - heading "Provider order" [level=3]
+    - paragraph: Drag active providers or use the move buttons to choose the order used by model lists and new selections.
+    - list "Active provider order":
+      - listitem:
+        - text: Acme Gateway
+        - code: acme-gateway
+        - button "Move Acme Gateway (acme-gateway) up" [disabled]: ↑
+        - button "Move Acme Gateway (acme-gateway) down": ↓
+      - listitem:
+        - text: minimax-cn
+        - button "Move minimax-cn up": ↑
+        - button "Move minimax-cn down" [disabled]: ↓
+    - status: Provider order saved.
+    - button "Restore default order"
+    - button "Save provider order" [disabled]
   - list:
+    - listitem:
+      - text: Acme Gateway Custom
+      - button "Edit Acme Gateway (acme-gateway)": Edit
+      - button "Delete Acme Gateway (acme-gateway)": Delete
     - listitem:
       - text: minimax-cn
       - img "API key configured"

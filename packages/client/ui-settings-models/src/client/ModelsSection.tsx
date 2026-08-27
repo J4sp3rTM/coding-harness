@@ -18,7 +18,11 @@ import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
 import { Button, IconPlusOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-web-react'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
-import { deriveKeyRef, messageOf, protocolChoices, providerUsable } from './store.ts'
+import { ProviderOrderEditor } from './ProviderOrderEditor.tsx'
+import {
+  activeConfiguredProviderRows, deriveKeyRef, hasProviderPriority, MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE,
+  messageOf, protocolChoices, providerUsable,
+} from './store.ts'
 import type { ModelsSettingsState, ModelsSettingsStore, ProviderRow } from './store.ts'
 import { ProviderEditor, type ProviderEditorProps } from './ProviderEditor.tsx'
 import type { en } from './locales.ts'
@@ -463,6 +467,8 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
   // one whose schema names the protocols one may speak; without it mounted
   // there is nothing to declare and the entry point stays disabled.
   const protocols = protocolChoices(state.namespaces.get('llm-pi-ai'))
+  const providerPriority = state.namespaces.get(MODEL_PROVIDER_PRIORITY_SETTINGS_NAMESPACE)
+  const orderableProviders = activeConfiguredProviderRows(state.rows)
 
   return (
     <div className={styles['section']}>
@@ -470,6 +476,19 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
       <p className={styles['intro']}>{t('intro')}</p>
       {!state.writable && state.status === 'ready' ? <p className={styles['notice']}>{t('readOnly')}</p> : null}
       <DevelopmentTiersCard state={state} controller={controller} api={api} t={t} />
+      {providerPriority !== undefined
+        && (orderableProviders.length > 1 || hasProviderPriority(providerPriority))
+        ? (
+          <ProviderOrderEditor
+            rows={state.rows}
+            namespace={providerPriority}
+            writable={state.writable}
+            api={api}
+            controller={controller}
+            t={t}
+          />
+        )
+        : null}
       {savedIdentity === undefined
         ? null
         : (

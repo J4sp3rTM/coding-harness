@@ -7,19 +7,21 @@
  * ToggleButton) shows both: model name + effort in the caption tone.
  * Data and submission ride the SAME per-session ModelDirectory as the
  * /model popup; exact-model reasoning metadata and the selected effort come
- * from the Host rather than a client-owned vocabulary. A rejected selection
- * announces through the shared transient Toast anchored to the composer
- * card; the in-menu strip with Retry remains the catalog-load surface.
+ * from the Host rather than a client-owned vocabulary. The Model pane opens
+ * with a focused search field that filters provider and model metadata. A
+ * rejected selection announces through the shared transient Toast
+ * anchored to the composer card; the in-menu strip with Retry remains the
+ * catalog-load surface.
  */
 import {
-  useEffect, useId, useMemo, useRef, useState, useSyncExternalStore,
+  useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
   type KeyboardEvent, type FocusEvent,
 } from 'react'
 import clsx from 'clsx'
 import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import {
   IconCheckOutline16, IconChevronDownOutline14, IconChevronRightOutline14,
-  IconWarningOutline16, Toast,
+  IconSearchOutline16, IconWarningOutline16, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelSelectInjected } from './slots.ts'
@@ -52,6 +54,7 @@ export function ModelSelect(
   )
   const [open, setOpen] = useState(false)
   const [pane, setPane] = useState<Pane>('root')
+  const [filterText, setFilterText] = useState('')
   // The in-menu error strip serves catalog loads (its Retry re-runs the
   // load); a rejected SELECTION announces through the transient toast
   // instead, so the strip renders only while the latest failure-capable
@@ -61,6 +64,7 @@ export function ModelSelect(
   const toastSeq = useRef(0)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const searchRef = useRef<HTMLInputElement | null>(null)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const id = useId()
 
@@ -76,6 +80,18 @@ export function ModelSelect(
           : { reasoningEffort: model.reasoning.defaultEffort },
       } satisfies ModelSelection,
     }))), [state.groups])
+  const filteredGroups = useMemo(() => {
+    const needle = filterText.toLowerCase()
+    if (needle === '') return state.groups
+    return state.groups.flatMap((group) => {
+      const providerMatches = [group.name, group.id].some(value => value.toLowerCase().includes(needle))
+      const models = providerMatches
+        ? group.models
+        : group.models.filter(model => [model.name, model.id].some(value => value.toLowerCase().includes(needle)))
+      return models.length === 0 ? [] : [{ ...group, models }]
+    })
+  }, [filterText, state.groups])
+  const filteredModelCount = filteredGroups.reduce((count, group) => count + group.models.length, 0)
   const selectedIndex = state.current === null
     ? -1
     : choices.findIndex(c => c.selection.provider === state.current?.provider && c.selection.model === state.current.model)
@@ -118,11 +134,20 @@ export function ModelSelect(
   useEffect(() => {
     if (!open) return
     const closeOutside = (event: MouseEvent): void => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+      if (rootRef.current?.contains(event.target as Node)) return
+      setOpen(false)
+      setPane('root')
+      setFilterText('')
     }
     document.addEventListener('mousedown', closeOutside)
     return () => { document.removeEventListener('mousedown', closeOutside) }
   }, [open])
+
+  useLayoutEffect(() => {
+    if (!open || pane === 'root' || rootRef.current?.contains(document.activeElement)) return
+    if (pane === 'model') searchRef.current?.focus()
+    else itemRefs.current.find(item => item !== null)?.focus()
+  })
 
   if (!available) return null
 
@@ -135,6 +160,7 @@ export function ModelSelect(
   const close = (restoreFocus = false): void => {
     setOpen(false)
     setPane('root')
+    setFilterText('')
     if (restoreFocus) queueMicrotask(() => { triggerRef.current?.focus() })
   }
 
@@ -142,7 +168,9 @@ export function ModelSelect(
     const items = itemRefs.current.filter(item => item !== null)
     if (items.length === 0) return
     const active = items.findIndex(item => item === document.activeElement)
-    const next = (Math.max(active, 0) + offset + items.length) % items.length
+    const next = active < 0
+      ? offset > 0 ? 0 : items.length - 1
+      : (active + offset + items.length) % items.length
     items[next]?.focus()
   }
 
@@ -158,6 +186,7 @@ export function ModelSelect(
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       moveFocus(event.key === 'ArrowDown' ? 1 : -1)
+      return
     }
   }
 
@@ -223,7 +252,7 @@ export function ModelSelect(
         type="button"
         className={css.trigger}
         aria-label={triggerAria}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? `${id}-menu` : undefined}
         title={triggerLabel}
@@ -245,12 +274,12 @@ export function ModelSelect(
         <div
           id={`${id}-menu`}
           className={css.menu}
-          role="menu"
+          role="dialog"
           aria-label={t('menu.aria')}
           aria-busy={state.status === 'loading' || busy}
         >
           {pane === 'root' && (
-            <>
+            <div role="menu" aria-label={t('menu.aria')}>
               <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { setPane('model') }}>
                 <span className={css.cellLabel}>{t('menu.model')}</span>
                 <span className={css.cellValue}>{modelLabel}</span>
@@ -263,11 +292,23 @@ export function ModelSelect(
                   <IconChevronRightOutline14 className={css.cellChevron} />
                 </button>
               )}
-            </>
+            </div>
           )}
 
           {pane === 'model' && (
             <>
+              <label className={css.searchBar}>
+                <span className={css.searchIcon} aria-hidden="true"><IconSearchOutline16 /></span>
+                <input
+                  ref={searchRef}
+                  type="search"
+                  className={css.searchInput}
+                  value={filterText}
+                  placeholder={t('filter.search')}
+                  aria-label={t('filter.search')}
+                  onChange={(event) => { setFilterText(event.currentTarget.value) }}
+                />
+              </label>
               {state.status === 'loading' && (
                 <div className={css.status}>{t('status.loading')}</div>
               )}
@@ -283,8 +324,8 @@ export function ModelSelect(
                   <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
                 </div>
               ))}
-              <div className={clsx(css.groups, 'scrollable')}>
-                {state.groups.map((group) => {
+              <div role="menu" aria-label={t('menu.model')} className={clsx(css.groups, 'scrollable')}>
+                {filteredGroups.map((group) => {
                   const headingId = `${id}-${group.id}`
                   return (
                     <section role="group" aria-labelledby={headingId} className={css.group} key={group.id}>
@@ -319,7 +360,10 @@ export function ModelSelect(
                   )
                 })}
               </div>
-              {state.status === 'ready' && choices.length === 0 && (
+              {state.status === 'ready' && filterText !== '' && filteredModelCount === 0 && (
+                <div className={css.empty}>{t('filter.noResults', { query: filterText })}</div>
+              )}
+              {state.status === 'ready' && filterText === '' && choices.length === 0 && (
                 <div className={css.empty}>{t('empty.models')}</div>
               )}
             </>
@@ -335,28 +379,32 @@ export function ModelSelect(
               )}
               {effortChoices.length === 0
                 ? <div className={css.empty}>{t('empty.efforts')}</div>
-                : effortChoices.map(level => (
-                  <button
-                    ref={itemRef()}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={effectiveEffort === level.effort}
-                    className={clsx(css.option, effectiveEffort === level.effort && css.selected)}
-                    key={level.key}
-                    disabled={busy}
-                    onClick={() => { chooseEffort(level.effort) }}
-                  >
-                    <span className={css.optionCopy}>
-                      <span className={css.modelName}>{level.label}</span>
-                      {level.description !== undefined && (
-                        <span className={css.description}>{level.description}</span>
-                      )}
-                    </span>
-                    <span className={css.check}>
-                      {effectiveEffort === level.effort ? <IconCheckOutline16 /> : null}
-                    </span>
-                  </button>
-                ))}
+                : (
+                  <div role="menu" aria-label={t('menu.effort')}>
+                    {effortChoices.map(level => (
+                      <button
+                        ref={itemRef()}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={effectiveEffort === level.effort}
+                        className={clsx(css.option, effectiveEffort === level.effort && css.selected)}
+                        key={level.key}
+                        disabled={busy}
+                        onClick={() => { chooseEffort(level.effort) }}
+                      >
+                        <span className={css.optionCopy}>
+                          <span className={css.modelName}>{level.label}</span>
+                          {level.description !== undefined && (
+                            <span className={css.description}>{level.description}</span>
+                          )}
+                        </span>
+                        <span className={css.check}>
+                          {effectiveEffort === level.effort ? <IconCheckOutline16 /> : null}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
             </>
           )}
         </div>

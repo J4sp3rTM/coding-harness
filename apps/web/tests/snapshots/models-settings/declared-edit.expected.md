@@ -4,87 +4,103 @@
     - button "General":
       - img
       - text: General
-    - button "Model":
+    - button "Models":
       - img
-      - text: Model
-    - button "插件":
+      - text: Models
+    - button "Plugins":
       - img
-      - text: 插件
-    - button "Agent 预设":
+      - text: Plugins
+    - button "Agent presets":
       - img
-      - text: Agent 预设
+      - text: Agent presets
   - button "Open configuration file"
   - button "Close":
     - img
     - text: Close
-  - heading "Model" [level=2]
-  - paragraph: 填入各提供方的 API 密钥即可使用其Model。
-  - region "开发 agent 分级":
-    - heading "开发 agent 分级" [level=3]
-    - paragraph: 父级／SessionsModel仍在编排器中选择。这些路由只用于委派工作和审查。
-    - text: T1 —— 特殊审查
-    - combobox "T1 —— 特殊审查":
-      - option "继承父级Model" [selected]
-    - combobox "T1 —— 特殊审查 · Effort" [disabled]:
-      - option "提供方默认Effort" [selected]
-    - paragraph: 用于 frontier 或特殊审查；只会提升委派的审查工作。
-    - text: T2 —— 实现与检查
-    - combobox "T2 —— 实现与检查":
-      - option "继承父级Model" [selected]
-    - combobox "T2 —— 实现与检查 · Effort" [disabled]:
-      - option "提供方默认Effort" [selected]
-    - paragraph: 用于普通实现、检查和验证。
-    - text: T3 —— 简单且低风险
-    - combobox "T3 —— 简单且低风险":
-      - option "继承父级Model" [selected]
-    - combobox "T3 —— 简单且低风险 · Effort" [disabled]:
-      - option "提供方默认Effort" [selected]
-    - paragraph: 用于简单、重复且低风险的工作。
-    - button "Save分级" [disabled]
+  - heading "Models" [level=2]
+  - paragraph: Enter your API keys to use models from the following providers.
+  - region "Development agent tiers":
+    - heading "Development agent tiers" [level=3]
+    - paragraph: The parent/session model remains selected in the composer. These routes apply only to delegated work and review.
+    - text: T1 — Exceptional review
+    - combobox "T1 — Exceptional review":
+      - option "Inherit parent model" [selected]
+    - combobox "T1 — Exceptional review · Reasoning effort" [disabled]:
+      - option "Provider default effort" [selected]
+    - paragraph: Use for frontier or exceptional review; it only escalates delegated review.
+    - text: T2 — Implementation and inspection
+    - combobox "T2 — Implementation and inspection":
+      - option "Inherit parent model" [selected]
+    - combobox "T2 — Implementation and inspection · Reasoning effort" [disabled]:
+      - option "Provider default effort" [selected]
+    - paragraph: Use for ordinary implementation, inspection, and validation.
+    - text: T3 — Simple and low-risk
+    - combobox "T3 — Simple and low-risk":
+      - option "Inherit parent model" [selected]
+    - combobox "T3 — Simple and low-risk · Reasoning effort" [disabled]:
+      - option "Provider default effort" [selected]
+    - paragraph: Use for simple, repetitive, and low-risk work.
+    - button "Save tiers" [disabled]
+  - region "Provider order":
+    - heading "Provider order" [level=3]
+    - paragraph: Drag active providers or use the move buttons to choose the order used by model lists and new selections.
+    - list "Active provider order":
+      - listitem:
+        - text: minimax-cn
+        - button "Move minimax-cn up" [disabled]: ↑
+        - button "Move minimax-cn down": ↓
+      - listitem:
+        - text: Acme Gateway
+        - code: acme-gateway
+        - button "Move Acme Gateway (acme-gateway) up": ↑
+        - button "Move Acme Gateway (acme-gateway) down" [disabled]: ↓
+    - status: Provider order saved.
+    - button "Restore default order" [disabled]
+    - button "Save provider order" [disabled]
   - list:
     - listitem:
       - text: minimax-cn
-      - img "API 密钥已配置"
-      - button "编辑 minimax-cn": 编辑
-      - button "删除 minimax-cn": 删除
+      - img "API key configured"
+      - button "Edit minimax-cn": Edit
+      - button "Delete minimax-cn": Delete
     - listitem:
-      - text: Acme Gateway 自定义
-      - button "编辑 Acme Gateway (acme-gateway)": 编辑
-      - button "删除 Acme Gateway (acme-gateway)": 删除
-      - text: Acme Gateway acme-gateway API 密钥
-      - textbox "API 密钥":
-        - /placeholder: Input API 密钥，或留空使用环境认证
+      - text: Acme Gateway Custom
+      - button "Edit Acme Gateway (acme-gateway)": Edit
+      - button "Delete Acme Gateway (acme-gateway)": Delete
+      - text: Acme Gateway acme-gateway API key
+      - textbox "API key":
+        - /placeholder: Enter an API key, or leave blank to use environment authentication
       - group:
-        - text: 自定义Settings 显示名称
-        - textbox "显示名称":
+        - text: Customized settings Display name
+        - textbox "Display name":
           - /placeholder: acme-gateway
           - text: Acme Gateway
-        - text: API 地址
-        - textbox "API 地址":
+        - text: Base URL
+        - textbox "Base URL":
           - /placeholder: https://gateway.acme.example/v1
           - text: https://gateway.acme.example/v1
-        - text: API 协议
-        - combobox "API 协议":
+        - text: API protocol
+        - combobox "API protocol":
           - option "openai-completions" [selected]
           - option "openai-responses"
           - option "anthropic-messages"
-        - region "Model目录":
-          - text: Model目录 已自定义Model目录
-          - button "恢复默认Model"
-          - button "获取可用Model"
+        - region "Models":
+          - text: Models Customized model catalog
+          - button "Restore defaults"
+          - button "Fetch available models"
           - textbox "Model ID 1":
             - /placeholder: Model ID
             - text: acme-large
-          - textbox "显示名称 1":
-            - /placeholder: 显示名称
-          - button "容量 1"
-          - button "删除Model 1"
-          - button "添加Model"
+          - textbox "Display name 1":
+            - /placeholder: Display name
+          - button "Capacities 1"
+          - button "Delete model 1"
+          - button "Add model"
       - button "Cancel"
-      - button "Save"
-  - button "添加提供方":
+      - button "Apply"
+  - button "Add provider":
     - img
-    - text: 添加提供方
-  - button "添加自定义提供方":
+    - text: Add provider
+  - button "Add a custom provider":
     - img
-    - text: 添加自定义提供方
+    - text: Add a custom provider

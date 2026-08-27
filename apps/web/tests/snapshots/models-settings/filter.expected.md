@@ -1,0 +1,6 @@
+- dialog "Model and reasoning effort":
+  - searchbox "Search models": Alpha
+  - menu "Model":
+    - group "Alpha Gateway":
+      - text: Alpha Gateway
+      - menuitemradio "Alpha Model"
