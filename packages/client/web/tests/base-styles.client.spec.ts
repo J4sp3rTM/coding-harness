@@ -54,6 +54,17 @@ describe('web shell base.css', () => {
     }
   })
 
+  it('references only tokens the theme sheets define from the boot page', () => {
+    // The boot page's fallbacks are light-mode values, so a token name that no
+    // sheet defines survives every test that renders it and only shows up as
+    // unreadable dark-mode contrast in the browser.
+    const bootCss = readFileSync(fileURLToPath(new URL('../src/AppRoot.module.css', import.meta.url)), 'utf8')
+    const themeCss = imports.map(specifier => readFileSync(resolveThemeSheet(specifier), 'utf8')).join('\n')
+    const used = new Set([...bootCss.matchAll(/var\(\s*(--[\w-]+)/g)].map(([, token = '']) => token))
+    expect(used.size).toBeGreaterThan(0)
+    for (const token of used) expect(themeCss.includes(`${token}:`), token).toBe(true)
+  })
+
   it('imports the scrollbar sheet after the token sheet it reads', () => {
     // Both sheets bind on `body`, so with scrollbar.css first the alias tokens
     // would still resolve; the order encodes the dependency direction so a
